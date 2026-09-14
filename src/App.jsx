@@ -1,15 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ArrowUpRight, ChevronRight, CirclePlay, Compass, Download, Home,
   Library, ListMusic, MoreHorizontal, Play, Search, UserRound,
 } from 'lucide-react'
 import './App.css'
+import Player from './components/Player.jsx'
 
 const songs = [
-  { title: 'Golden Hour', artist: 'JVKE', tone: 'pink', duration: '3:29', initials: 'GH' },
-  { title: 'Snooze', artist: 'SZA', tone: 'yellow', duration: '3:22', initials: 'SZ' },
-  { title: 'End of Beginning', artist: 'Djo', tone: 'lavender', duration: '2:39', initials: 'DB' },
-  { title: 'Good Days', artist: 'SZA', tone: 'blue', duration: '4:39', initials: 'GD' },
+  { title: 'Golden Hour', artist: 'JVKE', tone: 'pink', duration: '3:29', seconds: 209, initials: 'GH' },
+  { title: 'Snooze', artist: 'SZA', tone: 'yellow', duration: '3:22', seconds: 202, initials: 'SZ' },
+  { title: 'End of Beginning', artist: 'Djo', tone: 'lavender', duration: '2:39', seconds: 159, initials: 'DB' },
+  { title: 'Good Days', artist: 'SZA', tone: 'blue', duration: '4:39', seconds: 279, initials: 'GD' },
 ]
 
 const quickLinks = [
@@ -44,8 +45,43 @@ function SongArtwork({ tone, initials }) {
 
 function App() {
   const [search, setSearch] = useState('')
-  const [playing, setPlaying] = useState('')
+  const [currentSong, setCurrentSong] = useState(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [queue, setQueue] = useState([])
   const visibleSongs = songs.filter((song) => `${song.title} ${song.artist}`.toLowerCase().includes(search.toLowerCase()))
+
+  const selectSong = (song) => {
+    setCurrentSong(song)
+    setIsPlaying(true)
+    setProgress(0)
+    setQueue(songs.filter((candidate) => candidate.title !== song.title))
+  }
+
+  const playNext = () => {
+    if (!queue.length) return
+    selectSong(queue[0])
+  }
+
+  const playPrevious = () => {
+    if (!currentSong) return
+    const currentIndex = songs.findIndex((song) => song.title === currentSong.title)
+    selectSong(songs[(currentIndex - 1 + songs.length) % songs.length])
+  }
+
+  useEffect(() => {
+    if (!isPlaying || !currentSong) return undefined
+    const timer = window.setInterval(() => {
+      setProgress((currentProgress) => {
+        if (currentProgress >= currentSong.seconds) {
+          setIsPlaying(false)
+          return currentSong.seconds
+        }
+        return currentProgress + 1
+      })
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [currentSong, isPlaying])
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -61,13 +97,14 @@ function App() {
       <header className="topbar"><div className="mobile-brand"><span className="brand-mark">k</span><span>Krovi</span></div><div className="search-wrap"><Search size={19} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search songs, artists, albums..." aria-label="Search music" /><kbd>/</kbd></div><button className="avatar" aria-label="Open profile">AL</button></header>
       <section className="welcome-row"><div><p className="eyebrow">Tuesday, September 14</p><h1>Good morning, Alex <span>✦</span></h1><p className="subcopy">Ease into your day with something beautiful.</p></div><button className="mood-button"><span className="sun-icon">☼</span> Your mood <strong>Calm</strong><ChevronRight size={16} /></button></section>
 
-      <section className="featured-card"><div className="featured-copy"><span className="label">KROVI PICK <span>•</span> MADE FOR YOU</span><h2>Soft sounds for<br /><em>slow mornings.</em></h2><p>A gentle collection to start your day with a little more feeling.</p><button className="primary-button" onClick={() => setPlaying('Golden Hour')}><CirclePlay size={20} fill="currentColor" /> Play playlist</button></div><MusicDoodle /><div className="featured-meta"><span>12 songs</span><span className="meta-dot" /><span>42 min</span><span className="mini-avatars"><i /><i /><i /> +9</span></div></section>
+      <section className="featured-card"><div className="featured-copy"><span className="label">KROVI PICK <span>•</span> MADE FOR YOU</span><h2>Soft sounds for<br /><em>slow mornings.</em></h2><p>A gentle collection to start your day with a little more feeling.</p><button className="primary-button" onClick={() => selectSong(songs[0])}><CirclePlay size={20} fill="currentColor" /> Play playlist</button></div><MusicDoodle /><div className="featured-meta"><span>12 songs</span><span className="meta-dot" /><span>42 min</span><span className="mini-avatars"><i /><i /><i /> +9</span></div></section>
 
       <section className="section-block quick-section"><div className="section-heading"><div><p className="eyebrow">YOUR COLLECTION</p><h2>Pick up where you left off</h2></div><button className="text-button">See all <ArrowUpRight size={15} /></button></div><div className="quick-grid">{quickLinks.map(({ label, count, icon: Icon, tone }) => <button className={`quick-card ${tone}`} key={label}><span className="quick-icon"><Icon size={21} /></span><span><strong>{label}</strong><small>{count}</small></span><ChevronRight size={17} /></button>)}</div></section>
 
-      <section className="section-block recent-section"><div className="section-heading"><div><p className="eyebrow">LISTEN AGAIN</p><h2>Recently played</h2></div><button className="text-button">View history <ArrowUpRight size={15} /></button></div><div className="song-list">{visibleSongs.length ? visibleSongs.map((song) => <article className="song-row" key={song.title}><SongArtwork tone={song.tone} initials={song.initials} /><div className="song-info"><strong>{song.title}</strong><span>{song.artist}</span></div><span className="song-duration">{song.duration}</span><button className={`row-play ${playing === song.title ? 'is-playing' : ''}`} aria-label={`Play ${song.title}`} onClick={() => setPlaying(playing === song.title ? '' : song.title)}>{playing === song.title ? <span className="equalizer"><i /><i /><i /></span> : <Play size={15} fill="currentColor" />}</button><button className="more-button" aria-label={`More options for ${song.title}`}><MoreHorizontal size={19} /></button></article>) : <p className="empty-state">No songs found. Try another search.</p>}</div></section>
+      <section className="section-block recent-section"><div className="section-heading"><div><p className="eyebrow">LISTEN AGAIN</p><h2>Recently played</h2></div><button className="text-button">View history <ArrowUpRight size={15} /></button></div><div className="song-list">{visibleSongs.length ? visibleSongs.map((song) => <article className="song-row" key={song.title}><SongArtwork tone={song.tone} initials={song.initials} /><div className="song-info"><strong>{song.title}</strong><span>{song.artist}</span></div><span className="song-duration">{song.duration}</span><button className={`row-play ${currentSong?.title === song.title && isPlaying ? 'is-playing' : ''}`} aria-label={`Play ${song.title}`} onClick={() => currentSong?.title === song.title ? setIsPlaying((playing) => !playing) : selectSong(song)}>{currentSong?.title === song.title && isPlaying ? <span className="equalizer"><i /><i /><i /></span> : <Play size={15} fill="currentColor" />}</button><button className="more-button" aria-label={`More options for ${song.title}`}><MoreHorizontal size={19} /></button></article>) : <p className="empty-state">No songs found. Try another search.</p>}</div></section>
     </main>
     <nav className="bottom-nav" aria-label="Mobile navigation"><button className="active"><Home size={19} /><span>Home</span></button><button><Compass size={19} /><span>Explore</span></button><button><Library size={19} /><span>Library</span></button><button><UserRound size={19} /><span>Profile</span></button></nav>
+    <Player song={currentSong} isPlaying={isPlaying} progress={progress} queue={queue} onTogglePlay={() => setIsPlaying((playing) => !playing)} onNext={playNext} onPrevious={playPrevious} onSeek={setProgress} onSelectSong={selectSong} />
   </div>
 }
 
