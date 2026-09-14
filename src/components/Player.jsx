@@ -35,15 +35,13 @@ function PlayerArtwork({ track, large = false }) {
   return <div className={`player-art ${track.tone || 'blue'} ${large ? 'large' : ''}`}>{track.thumbnail ? <img src={track.thumbnail} alt={`Thumbnail for ${track.title}`} /> : <span>{track.initials || 'YT'}</span>}<i /><b /></div>
 }
 
-function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectTrack, onTrackStarted, likedTracks, onToggleLike, onRequestPlaylist, onRemoveFromQueue, onClearQueue }) {
+function QueueDrawer({ queue, currentQueueIndex, onSelectTrack, onRemoveFromQueue, onClearQueue, onClose }) {
+  return <div className="queue-drawer-backdrop" role="presentation" onClick={onClose}><section className="queue-drawer" role="dialog" aria-modal="true" aria-label="Playback queue" onClick={(event) => event.stopPropagation()}><header className="queue-drawer-header"><div><p className="expanded-eyebrow">UP NEXT</p><h2>Your queue</h2></div><button type="button" className="expanded-close" aria-label="Close queue" onClick={onClose}><X size={20} /></button></header>{queue.length ? <div className="queue-drawer-list">{queue.map((track, index) => <div className={`queue-drawer-row ${index === currentQueueIndex ? 'is-current' : ''}`} key={`${track.videoId}-${index}`}><button type="button" className="queue-song-main" onClick={() => { onSelectTrack(track, true, queue); onClose() }}><PlayerArtwork track={track} /><span><strong>{track.title}</strong><small>{index === currentQueueIndex ? 'Now playing' : track.artist}</small></span></button>{index !== currentQueueIndex && <button type="button" className="queue-remove" aria-label={`Remove ${track.title} from queue`} onClick={() => onRemoveFromQueue(track.videoId)}><Trash2 size={16} /></button>}</div>)}</div> : <p className="queue-empty">Your queue is clear.</p>}<button type="button" className="queue-clear" onClick={onClearQueue}>Clear queue</button></section></div>
+}
+
+function Player({ playback, currentTrack, queue, currentQueueIndex, playRequest, onPlaybackChange, onSelectTrack, onTrackStarted, likedTracks, onToggleLike, onRequestPlaylist, onRemoveFromQueue, onClearQueue }) {
   const [isExpanded, setIsExpanded] = useState(false)
-  const [hiddenMiniPlayerVideoId, setHiddenMiniPlayerVideoId] = useState('')
-  const [miniPlayerPosition, setMiniPlayerPosition] = useState(null)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [isBuffering, setIsBuffering] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
-  const [progress, setProgress] = useState(0)
+  const [isQueueOpen, setIsQueueOpen] = useState(false)
   const [volume, setVolume] = useState(80)
   const [isMuted, setIsMuted] = useState(false)
   const [shuffle, setShuffle] = useState(false)
@@ -60,6 +58,17 @@ function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectT
   const playRequestRef = useRef(playRequest)
   const volumeBeforeMuteRef = useRef(volume)
   const miniPlayerDragRef = useRef(null)
+  const { isPlaying, currentTime, duration, pipVisible, pipPosition, isLoading: isBuffering } = playback
+  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0
+
+  useEffect(() => {
+    if (!isExpanded && !isQueueOpen) return undefined
+    const closeOnEscape = (event) => { if (event.key === 'Escape') { setIsQueueOpen(false); if (isExpanded) setIsExpanded(false) } }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', closeOnEscape)
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener('keydown', closeOnEscape) }
+  }, [isExpanded, isQueueOpen])
   const videoId = currentTrack?.videoId || ''
   const hasVideoId = Boolean(videoId)
 
@@ -71,15 +80,16 @@ function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectT
   useEffect(() => { playRequestRef.current = playRequest }, [playRequest])
 
   useEffect(() => {
-    const clampMiniPlayer = () => setMiniPlayerPosition((position) => {
+    const clampMiniPlayer = () => onPlaybackChange({ pipPosition: playback.pipPosition && (() => {
+      const position = playback.pipPosition
       if (!position) return position
       const width = Math.min(340, window.innerWidth - 24)
       const height = window.innerWidth <= 800 ? 150 : 110
       return { left: Math.max(12, Math.min(position.left, window.innerWidth - width - 12)), top: Math.max(12, Math.min(position.top, window.innerHeight - height - 12)) }
-    })
+    })() })
     window.addEventListener('resize', clampMiniPlayer)
     return () => window.removeEventListener('resize', clampMiniPlayer)
-  }, [])
+  }, [onPlaybackChange, playback.pipPosition])
 
   const stopProgressPolling = useCallback(() => {
     if (progressTimerRef.current) window.clearInterval(progressTimerRef.current)
@@ -91,10 +101,8 @@ function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectT
     if (!player?.getCurrentTime || !player.getDuration) return
     const nextCurrentTime = Number(player.getCurrentTime()) || 0
     const nextDuration = Number(player.getDuration()) || 0
-    setCurrentTime(nextCurrentTime)
-    setDuration(nextDuration)
-    setProgress(nextDuration > 0 ? Math.min(100, (nextCurrentTime / nextDuration) * 100) : 0)
-  }, [])
+    onPlaybackChange({ currentTime: nextCurrentTime, duration: nextDuration })
+  }, [onPlaybackChange])
 
   const startProgressPolling = useCallback(() => {
     stopProgressPolling()
@@ -111,18 +119,14 @@ function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectT
     queueIndexRef.current = nextIndex
     currentTrackRef.current = track
     currentVideoIdRef.current = track.videoId
-    setIsPlaying(false)
-    setIsBuffering(Boolean(options.autoplay))
-    setCurrentTime(0)
-    setDuration(0)
-    setProgress(0)
+    onPlaybackChange({ isPlaying: false, isLoading: Boolean(options.autoplay), currentTime: 0, duration: 0, error: '' })
     stopProgressPolling()
     const player = youtubePlayerRef.current
     if (player) {
       player.loadVideoById(track.videoId)
       if (options.autoplay) player.playVideo()
     }
-  }, [onSelectTrack, stopProgressPolling])
+  }, [onPlaybackChange, onSelectTrack, stopProgressPolling])
 
   const nextTrack = useCallback(() => {
     const tracks = queueRef.current
@@ -147,8 +151,7 @@ function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectT
     const time = Number(player?.getCurrentTime?.()) || 0
     if (time > 3) {
       player.seekTo(0, true)
-      setCurrentTime(0)
-      setProgress(0)
+      onPlaybackChange({ currentTime: 0 })
       return
     }
     const tracks = queueRef.current
@@ -190,44 +193,38 @@ function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectT
             player.setVolume(volume)
             setVolume(player.getVolume?.() || volume)
             setIsMuted(Boolean(player.isMuted?.()))
+            if (playback.currentTime > 0) player.seekTo(playback.currentTime, true)
             if (playRequestRef.current?.videoId === trackVideoId) player.playVideo()
           },
           onStateChange: (event) => {
             if (currentVideoIdRef.current !== trackVideoId) return
             if (event.data === youtube.PlayerState.PLAYING) {
-              setIsPlaying(true)
-              setIsBuffering(false)
+              onPlaybackChange({ isPlaying: true, isLoading: false })
               onTrackStarted?.(currentTrackRef.current)
               startProgressPolling()
             } else if (event.data === youtube.PlayerState.BUFFERING) {
-              setIsPlaying(false)
-              setIsBuffering(true)
+              onPlaybackChange({ isPlaying: false, isLoading: true })
               stopProgressPolling()
             } else if (event.data === youtube.PlayerState.PAUSED) {
-              setIsPlaying(false)
-              setIsBuffering(false)
+              onPlaybackChange({ isPlaying: false, isLoading: false })
               stopProgressPolling()
               updateProgress()
             } else if (event.data === youtube.PlayerState.ENDED) {
-              setIsPlaying(false)
-              setIsBuffering(false)
+              onPlaybackChange({ isPlaying: false, isLoading: false })
               stopProgressPolling()
-              setProgress(100)
+              onPlaybackChange({ currentTime: duration || currentTime })
               updateProgress()
               handleEnded()
             } else if (event.data === youtube.PlayerState.CUED) {
-              setIsPlaying(false)
-              setIsBuffering(false)
+              onPlaybackChange({ isPlaying: false, isLoading: false })
               stopProgressPolling()
-              setCurrentTime(0)
-              setProgress(0)
+              onPlaybackChange({ currentTime: 0, duration: 0 })
             }
           },
           onError: () => {
             if (currentVideoIdRef.current !== trackVideoId) return
             stopProgressPolling()
-            setIsPlaying(false)
-            setIsBuffering(false)
+            onPlaybackChange({ isPlaying: false, isLoading: false, error: 'YouTube could not play this video.' })
           },
         },
       })
@@ -235,21 +232,17 @@ function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectT
       currentVideoIdRef.current = trackVideoId
     })
     return () => { cancelled = true }
-  }, [handleEnded, hasVideoId, onTrackStarted, startProgressPolling, stopProgressPolling, updateProgress, videoId, volume])
+  }, [currentTime, duration, handleEnded, hasVideoId, onPlaybackChange, onTrackStarted, playback.currentTime, startProgressPolling, stopProgressPolling, updateProgress, videoId, volume])
 
   useEffect(() => {
     const player = youtubePlayerRef.current
     if (!videoId || !player || currentVideoIdRef.current === videoId) return
     currentVideoIdRef.current = videoId
-    setIsPlaying(false)
-    setIsBuffering(false)
-    setCurrentTime(0)
-    setDuration(0)
-    setProgress(0)
+    onPlaybackChange({ isPlaying: false, isLoading: false, currentTime: 0, duration: 0, error: '' })
     stopProgressPolling()
     player.loadVideoById(videoId)
     if (playRequest?.videoId === videoId) player.playVideo()
-  }, [playRequest?.videoId, stopProgressPolling, videoId])
+  }, [onPlaybackChange, playRequest?.videoId, stopProgressPolling, videoId])
 
   useEffect(() => () => {
     stopProgressPolling()
@@ -268,7 +261,7 @@ function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectT
   const handleSeek = (event) => {
     const nextProgress = Number(event.target.value)
     const targetTime = (nextProgress / 100) * duration
-    setProgress(Number.isFinite(nextProgress) ? nextProgress : 0)
+    onPlaybackChange({ currentTime: targetTime })
     if (youtubePlayerRef.current && Number.isFinite(targetTime)) youtubePlayerRef.current.seekTo(targetTime, true)
   }
 
@@ -302,16 +295,17 @@ function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectT
     const panel = event.currentTarget
     const rect = panel.getBoundingClientRect()
     panel.setPointerCapture?.(event.pointerId)
-    miniPlayerDragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top }
-    setMiniPlayerPosition({ left: rect.left, top: rect.top })
+    miniPlayerDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top, dragging: false }
   }
 
   const handleMiniPlayerPointerMove = (event) => {
     const drag = miniPlayerDragRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
+    if (!drag.dragging && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 8) return
+    drag.dragging = true
     const width = event.currentTarget.getBoundingClientRect().width
     const height = event.currentTarget.getBoundingClientRect().height
-    setMiniPlayerPosition({ left: Math.max(12, Math.min(event.clientX - drag.offsetX, window.innerWidth - width - 12)), top: Math.max(12, Math.min(event.clientY - drag.offsetY, window.innerHeight - height - 12)) })
+    onPlaybackChange({ pipPosition: { left: Math.max(12, Math.min(event.clientX - drag.offsetX, window.innerWidth - width - 12)), top: Math.max(12, Math.min(event.clientY - drag.offsetY, window.innerHeight - height - 12)) } })
   }
 
   const handleMiniPlayerPointerUp = (event) => {
@@ -335,12 +329,14 @@ function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectT
     <button type="button" className={`player-icon-button ${repeatMode !== 'OFF' ? 'active' : ''}`} aria-label={`Repeat ${repeatMode.toLowerCase()}`} title={`Repeat ${repeatMode.toLowerCase()}`} onClick={cycleRepeat}><Repeat2 size={17} /><small className={repeatMode === 'ONE' ? 'repeat-one' : ''}>{repeatMode === 'ONE' ? '1' : ''}</small></button>
   </>
   const likeButton = <><button type="button" className={`player-icon-button heart-button ${isLiked ? 'liked' : ''}`} aria-label={isLiked ? 'Unlike current song' : 'Like current song'} title={isLiked ? 'Unlike' : 'Like'} onClick={() => onToggleLike?.(currentTrack)}><Heart size={17} fill={isLiked ? 'currentColor' : 'none'} /></button><button type="button" className="player-icon-button" aria-label="Add current song to playlist" title="Add to playlist" onClick={() => onRequestPlaylist?.(currentTrack)}><ListMusic size={17} /></button></>
-  const dockControls = <><div className="secondary-controls">{secondaryControls}</div><button type="button" className="player-main-button" aria-label={isPlaying ? 'Pause song' : 'Play song'} onClick={handleTogglePlay}>{playIcon}</button>{likeButton}</>
+  const dockControls = <><div className="secondary-controls">{secondaryControls}</div><button type="button" className="player-main-button" aria-label={isPlaying ? 'Pause song' : 'Play song'} onClick={handleTogglePlay}>{playIcon}</button>{likeButton}{!pipVisible && <button type="button" className="player-icon-button" aria-label="Show mini player" title="Show mini player" onClick={() => onPlaybackChange({ pipVisible: true })}><Maximize2 size={16} /></button>}</>
 
   return <>
-    {videoId && <section className={`youtube-player-panel ${hiddenMiniPlayerVideoId === videoId ? 'is-hidden' : ''}`} aria-label="YouTube mini player" style={miniPlayerPosition ? { left: `${miniPlayerPosition.left}px`, top: `${miniPlayerPosition.top}px`, right: 'auto', bottom: 'auto' } : undefined} onPointerDown={handleMiniPlayerPointerDown} onPointerMove={handleMiniPlayerPointerMove} onPointerUp={handleMiniPlayerPointerUp} onPointerCancel={handleMiniPlayerPointerUp}><div ref={playerContainerRef} className="youtube-player-container" /><div className="youtube-mini-overlay"><button type="button" className="mini-player-expand" aria-label="Expand player" onClick={() => setIsExpanded(true)}><Maximize2 size={16} /></button><button type="button" className="mini-player-close" aria-label="Close mini player" onClick={() => setHiddenMiniPlayerVideoId(videoId)}><X size={16} /></button></div></section>}
+    {isExpanded && !isQueueOpen && <button type="button" className="mobile-queue-toggle" aria-label="Open queue" aria-expanded={isQueueOpen} onClick={() => setIsQueueOpen(true)}><ListMusic size={18} /><span>Queue</span></button>}
+    {videoId && <section className={`youtube-player-panel ${!pipVisible ? 'is-hidden' : ''}`} aria-label="YouTube mini player" style={pipPosition ? { left: `${pipPosition.left}px`, top: `${pipPosition.top}px`, right: 'auto', bottom: 'auto' } : undefined} onPointerDown={handleMiniPlayerPointerDown} onPointerMove={handleMiniPlayerPointerMove} onPointerUp={handleMiniPlayerPointerUp} onPointerCancel={handleMiniPlayerPointerUp}><div ref={playerContainerRef} className="youtube-player-container" /><div className="youtube-mini-overlay"><button type="button" className="mini-player-expand" aria-label="Expand player" onClick={() => setIsExpanded(true)}><Maximize2 size={16} /></button><button type="button" className="mini-player-close" aria-label="Close mini player" onClick={() => onPlaybackChange({ pipVisible: false })}><X size={16} /></button></div></section>}
     <section className="player-dock" aria-label="Music player"><div className="player-dock-inner"><div className="player-current" role="button" tabIndex="0" onClick={() => setIsExpanded(true)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setIsExpanded(true) }}><PlayerArtwork track={currentTrack} /><span className="player-track"><strong>{currentTrack.title}</strong><small>{currentTrack.artist}</small></span></div><div className="player-controls">{dockControls}</div><div className="player-progress-wrap"><span>{formatTime(currentTime)}</span><input className="player-progress" type="range" min="0" max="100" step="0.1" value={Number.isFinite(progress) ? progress : 0} onChange={handleSeek} aria-label="Playback progress" style={{ '--progress': `${progress}%` }} /><span>{formatTime(duration)}</span></div><div className="volume-control"><button type="button" className="player-icon-button" aria-label={isMuted ? 'Unmute' : 'Mute'} title={isMuted ? 'Unmute' : 'Mute'} onClick={handleMute}>{isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><input type="range" min="0" max="100" step="1" value={isMuted ? 0 : volume} onChange={handleVolume} aria-label="Volume" /></div><button type="button" className="player-expand-button" aria-label="Open full player" title="Open full player" onClick={() => setIsExpanded(true)}><Maximize2 size={17} /></button></div></section>
-    {isExpanded && <div className="player-overlay" role="presentation" onClick={() => setIsExpanded(false)}><section className="expanded-player" role="dialog" aria-modal="true" aria-label={`${currentTrack.title} player`} onClick={(event) => event.stopPropagation()}><header className="expanded-header"><button type="button" className="expanded-close" aria-label="Close player" onClick={() => setIsExpanded(false)}><ChevronDown size={21} /></button><span>NOW PLAYING</span><button type="button" className="expanded-queue-label" aria-label="Queue"><ListMusic size={19} /></button></header><div className="expanded-content"><PlayerArtwork track={currentTrack} large /><p className="expanded-eyebrow">KROVI SESSION</p><h2>{currentTrack.title}</h2><p className="expanded-artist">{currentTrack.artist}</p>{likeButton}<div className="expanded-progress"><input className="player-progress" type="range" min="0" max="100" step="0.1" value={Number.isFinite(progress) ? progress : 0} onChange={handleSeek} aria-label="Playback progress" style={{ '--progress': `${progress}%` }} /><div><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div></div><div className="expanded-controls">{secondaryControls}<button type="button" className="expanded-play" aria-label={isPlaying ? 'Pause song' : 'Play song'} onClick={handleTogglePlay}>{expandedPlayIcon}</button></div><div className="expanded-volume"><button type="button" className="player-icon-button" aria-label={isMuted ? 'Unmute' : 'Mute'} onClick={handleMute}>{isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button><input type="range" min="0" max="100" step="1" value={isMuted ? 0 : volume} onChange={handleVolume} aria-label="Volume" /></div></div><aside className="queue-panel"><div className="queue-heading"><div><p className="expanded-eyebrow">UP NEXT</p><h3>Your queue</h3></div><button type="button" className="queue-clear" onClick={onClearQueue}>Clear queue</button></div><div className="queue-current"><PlayerArtwork track={currentTrack} /><span><strong>{currentTrack.title}</strong><small>{currentTrack.artist}</small></span></div>{queue.length > 1 ? <div className="queue-list">{queue.filter((_, index) => index !== currentQueueIndex).map((queuedTrack, index) => <div className="queue-song" key={`${queuedTrack.videoId || queuedTrack.title}-${index}`}><button type="button" className="queue-song-main" onClick={() => { playTrack(queuedTrack, { autoplay: true, queue }); setIsExpanded(false) }}><PlayerArtwork track={queuedTrack} /><span><strong>{queuedTrack.title}</strong><small>{queuedTrack.artist}</small></span></button><button type="button" className="queue-remove" aria-label={`Remove ${queuedTrack.title} from queue`} title="Remove from queue" onClick={() => onRemoveFromQueue?.(queuedTrack.videoId)}><Trash2 size={15} /></button><button type="button" className="queue-remove" aria-label={`Add ${queuedTrack.title} to playlist`} title="Add to playlist" onClick={() => onRequestPlaylist?.(queuedTrack)}><ListMusic size={15} /></button></div>)}</div> : <p className="queue-empty">Your queue is clear.</p>}</aside></section></div>}
+    {isExpanded && <div className="player-overlay" role="presentation" onClick={() => setIsExpanded(false)}><section className="expanded-player" role="dialog" aria-modal="true" aria-label={`${currentTrack.title} player`} onClick={(event) => event.stopPropagation()}><header className="expanded-header"><button type="button" className="expanded-close" aria-label="Close player" onClick={() => setIsExpanded(false)}><ChevronDown size={21} /></button><span>NOW PLAYING</span><button type="button" className="expanded-queue-label" aria-label="Open queue" aria-expanded={isQueueOpen} onClick={() => setIsQueueOpen(true)}><ListMusic size={19} /></button></header><div className="expanded-content"><PlayerArtwork track={currentTrack} large /><p className="expanded-eyebrow">KROVI SESSION</p><h2>{currentTrack.title}</h2><p className="expanded-artist">{currentTrack.artist}</p>{!pipVisible && <button type="button" className="restore-video-button" onClick={() => onPlaybackChange({ pipVisible: true })}><Maximize2 size={16} /> Show video</button>}{likeButton}<div className="expanded-progress"><input className="player-progress" type="range" min="0" max="100" step="0.1" value={Number.isFinite(progress) ? progress : 0} onChange={handleSeek} aria-label="Playback progress" style={{ '--progress': `${progress}%` }} /><div><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div></div><div className="expanded-controls">{secondaryControls}<button type="button" className="expanded-play" aria-label={isPlaying ? 'Pause song' : 'Play song'} onClick={handleTogglePlay}>{expandedPlayIcon}</button></div><div className="expanded-volume"><button type="button" className="player-icon-button" aria-label={isMuted ? 'Unmute' : 'Mute'} onClick={handleMute}>{isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button><input type="range" min="0" max="100" step="1" value={isMuted ? 0 : volume} onChange={handleVolume} aria-label="Volume" /></div></div><aside className="queue-panel"><div className="queue-heading"><div><p className="expanded-eyebrow">UP NEXT</p><h3>Your queue</h3></div><button type="button" className="queue-clear" onClick={onClearQueue}>Clear queue</button></div><div className="queue-current"><PlayerArtwork track={currentTrack} /><span><strong>{currentTrack.title}</strong><small>{currentTrack.artist}</small></span></div>{queue.length > 1 ? <div className="queue-list">{queue.filter((_, index) => index !== currentQueueIndex).map((queuedTrack, index) => <div className="queue-song" key={`${queuedTrack.videoId || queuedTrack.title}-${index}`}><button type="button" className="queue-song-main" onClick={() => { playTrack(queuedTrack, { autoplay: true, queue }); setIsExpanded(false) }}><PlayerArtwork track={queuedTrack} /><span><strong>{queuedTrack.title}</strong><small>{queuedTrack.artist}</small></span></button><button type="button" className="queue-remove" aria-label={`Remove ${queuedTrack.title} from queue`} title="Remove from queue" onClick={() => onRemoveFromQueue?.(queuedTrack.videoId)}><Trash2 size={15} /></button><button type="button" className="queue-remove" aria-label={`Add ${queuedTrack.title} to playlist`} title="Add to playlist" onClick={() => onRequestPlaylist?.(queuedTrack)}><ListMusic size={15} /></button></div>)}</div> : <p className="queue-empty">Your queue is clear.</p>}</aside></section></div>}
+    {isQueueOpen && <QueueDrawer queue={queue} currentQueueIndex={currentQueueIndex} onSelectTrack={onSelectTrack} onRemoveFromQueue={onRemoveFromQueue} onClearQueue={onClearQueue} onClose={() => setIsQueueOpen(false)} />}
   </>
 }
 

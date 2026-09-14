@@ -1,0 +1,19 @@
+{
+  "name": "Krovi Music",
+  "short_name": "Krovi",
+  "description": "A softer place to find and keep music.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8f4ec",
+  "theme_color": "#f8f4ec",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

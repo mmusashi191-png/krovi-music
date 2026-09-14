@@ -7,12 +7,19 @@
   -webkit-font-smoothing: antialiased;
 }
 
+html {
+  min-height: 100%;
+  background: #f8f4ec;
+  overscroll-behavior-y: none;
+}
+
 .app-shell button, .app-shell a, .app-shell input { -webkit-tap-highlight-color: transparent; }
 .app-shell button:focus-visible, .app-shell a:focus-visible, .app-shell input:focus-visible { outline: 2px solid #db7180; outline-offset: 3px; }
 
 body {
   margin: 0;
   min-width: 320px;
+  min-height: 100svh;
 }
 
 #root {
