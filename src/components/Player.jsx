@@ -1,69 +1,346 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ChevronDown,
-  ListMusic,
-  Maximize2,
-  Pause,
-  Play,
-  SkipBack,
-  SkipForward,
+  ChevronDown, Heart, ListMusic, LoaderCircle, Maximize2, Pause, Play, Repeat2,
+  Shuffle, SkipBack, SkipForward, Trash2, Volume2, VolumeX, X,
 } from 'lucide-react'
 
-function formatTime(seconds) {
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = Math.floor(seconds % 60).toString().padStart(2, '0')
-  return `${minutes}:${remainingSeconds}`
+let youtubeApiPromise
+
+function loadYouTubeApi() {
+  if (window.YT?.Player) return Promise.resolve(window.YT)
+  if (!youtubeApiPromise) {
+    youtubeApiPromise = new Promise((resolve) => {
+      const existingScript = document.querySelector('script[src="https://www.youtube.com/iframe_api"]')
+      const previousReady = window.onYouTubeIframeAPIReady
+      window.onYouTubeIframeAPIReady = () => {
+        previousReady?.()
+        resolve(window.YT)
+      }
+      if (!existingScript) {
+        const script = document.createElement('script')
+        script.src = 'https://www.youtube.com/iframe_api'
+        document.head.appendChild(script)
+      }
+    })
+  }
+  return youtubeApiPromise
 }
 
-function PlayerArtwork({ song, large = false }) {
-  return <div className={`player-art ${song.tone} ${large ? 'large' : ''}`}><span>{song.initials}</span><i /><b /></div>
+function formatTime(value) {
+  const seconds = Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-function Player({ song, isPlaying, progress, queue, onTogglePlay, onNext, onPrevious, onSeek, onSelectSong }) {
+function PlayerArtwork({ track, large = false }) {
+  return <div className={`player-art ${track.tone || 'blue'} ${large ? 'large' : ''}`}>{track.thumbnail ? <img src={track.thumbnail} alt={`Thumbnail for ${track.title}`} /> : <span>{track.initials || 'YT'}</span>}<i /><b /></div>
+}
+
+function Player({ currentTrack, queue, currentQueueIndex, playRequest, onSelectTrack, onTrackStarted, likedTracks, onToggleLike, onRequestPlaylist, onRemoveFromQueue, onClearQueue }) {
   const [isExpanded, setIsExpanded] = useState(false)
+  const [hiddenMiniPlayerVideoId, setHiddenMiniPlayerVideoId] = useState('')
+  const [miniPlayerPosition, setMiniPlayerPosition] = useState(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [isBuffering, setIsBuffering] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [progress, setProgress] = useState(0)
+  const [volume, setVolume] = useState(80)
+  const [isMuted, setIsMuted] = useState(false)
+  const [shuffle, setShuffle] = useState(false)
+  const [repeatMode, setRepeatMode] = useState('OFF')
+  const playerContainerRef = useRef(null)
+  const youtubePlayerRef = useRef(null)
+  const progressTimerRef = useRef(null)
+  const currentVideoIdRef = useRef('')
+  const currentTrackRef = useRef(currentTrack)
+  const queueRef = useRef(queue)
+  const queueIndexRef = useRef(currentQueueIndex)
+  const shuffleRef = useRef(shuffle)
+  const repeatModeRef = useRef(repeatMode)
+  const playRequestRef = useRef(playRequest)
+  const volumeBeforeMuteRef = useRef(volume)
+  const miniPlayerDragRef = useRef(null)
+  const videoId = currentTrack?.videoId || ''
+  const hasVideoId = Boolean(videoId)
 
-  if (!song) return null
+  useEffect(() => { currentTrackRef.current = currentTrack }, [currentTrack])
+  useEffect(() => { queueRef.current = queue }, [queue])
+  useEffect(() => { queueIndexRef.current = currentQueueIndex }, [currentQueueIndex])
+  useEffect(() => { shuffleRef.current = shuffle }, [shuffle])
+  useEffect(() => { repeatModeRef.current = repeatMode }, [repeatMode])
+  useEffect(() => { playRequestRef.current = playRequest }, [playRequest])
 
-  const openExpanded = () => setIsExpanded(true)
-  const closeExpanded = () => setIsExpanded(false)
-  const handleKeyDown = (event) => {
-    if (event.key === 'Enter' || event.key === ' ') openExpanded()
+  useEffect(() => {
+    const clampMiniPlayer = () => setMiniPlayerPosition((position) => {
+      if (!position) return position
+      const width = Math.min(340, window.innerWidth - 24)
+      const height = window.innerWidth <= 800 ? 150 : 110
+      return { left: Math.max(12, Math.min(position.left, window.innerWidth - width - 12)), top: Math.max(12, Math.min(position.top, window.innerHeight - height - 12)) }
+    })
+    window.addEventListener('resize', clampMiniPlayer)
+    return () => window.removeEventListener('resize', clampMiniPlayer)
+  }, [])
+
+  const stopProgressPolling = useCallback(() => {
+    if (progressTimerRef.current) window.clearInterval(progressTimerRef.current)
+    progressTimerRef.current = null
+  }, [])
+
+  const updateProgress = useCallback(() => {
+    const player = youtubePlayerRef.current
+    if (!player?.getCurrentTime || !player.getDuration) return
+    const nextCurrentTime = Number(player.getCurrentTime()) || 0
+    const nextDuration = Number(player.getDuration()) || 0
+    setCurrentTime(nextCurrentTime)
+    setDuration(nextDuration)
+    setProgress(nextDuration > 0 ? Math.min(100, (nextCurrentTime / nextDuration) * 100) : 0)
+  }, [])
+
+  const startProgressPolling = useCallback(() => {
+    stopProgressPolling()
+    updateProgress()
+    progressTimerRef.current = window.setInterval(updateProgress, 250)
+  }, [stopProgressPolling, updateProgress])
+
+  const playTrack = useCallback((track, options = {}) => {
+    if (!track?.videoId) return
+    const trackQueue = options.queue || queueRef.current
+    const nextIndex = trackQueue.findIndex((candidate) => candidate.videoId === track.videoId)
+    onSelectTrack(track, Boolean(options.autoplay), trackQueue)
+    queueRef.current = trackQueue
+    queueIndexRef.current = nextIndex
+    currentTrackRef.current = track
+    currentVideoIdRef.current = track.videoId
+    setIsPlaying(false)
+    setIsBuffering(Boolean(options.autoplay))
+    setCurrentTime(0)
+    setDuration(0)
+    setProgress(0)
+    stopProgressPolling()
+    const player = youtubePlayerRef.current
+    if (player) {
+      player.loadVideoById(track.videoId)
+      if (options.autoplay) player.playVideo()
+    }
+  }, [onSelectTrack, stopProgressPolling])
+
+  const nextTrack = useCallback(() => {
+    const tracks = queueRef.current
+    const index = queueIndexRef.current
+    if (!tracks.length) return
+    let nextIndex
+    if (shuffleRef.current && tracks.length > 1) {
+      const choices = tracks.map((_, candidateIndex) => candidateIndex).filter((candidateIndex) => candidateIndex !== index)
+      nextIndex = choices[Math.floor(Math.random() * choices.length)]
+    } else if (index < tracks.length - 1) {
+      nextIndex = index + 1
+    } else if (repeatModeRef.current === 'ALL') {
+      nextIndex = 0
+    } else {
+      return
+    }
+    playTrack(tracks[nextIndex], { autoplay: true, queue: tracks })
+  }, [playTrack])
+
+  const previousTrack = useCallback(() => {
+    const player = youtubePlayerRef.current
+    const time = Number(player?.getCurrentTime?.()) || 0
+    if (time > 3) {
+      player.seekTo(0, true)
+      setCurrentTime(0)
+      setProgress(0)
+      return
+    }
+    const tracks = queueRef.current
+    const index = queueIndexRef.current
+    if (!tracks.length) return
+    let previousIndex = index - 1
+    if (previousIndex < 0) {
+      if (repeatModeRef.current !== 'ALL') return
+      previousIndex = tracks.length - 1
+    }
+    playTrack(tracks[previousIndex], { autoplay: true, queue: tracks })
+  }, [playTrack])
+
+  const handleEnded = useCallback(() => {
+    if (repeatModeRef.current === 'ONE') {
+      const player = youtubePlayerRef.current
+      const track = currentTrackRef.current
+      if (player && track?.videoId) {
+        player.loadVideoById(track.videoId)
+        player.playVideo()
+      }
+      return
+    }
+    nextTrack()
+  }, [nextTrack])
+
+  useEffect(() => {
+    if (!hasVideoId || youtubePlayerRef.current || !playerContainerRef.current) return undefined
+    let cancelled = false
+    const trackVideoId = videoId
+    loadYouTubeApi().then((youtube) => {
+      if (cancelled || youtubePlayerRef.current || !playerContainerRef.current) return
+      const player = new youtube.Player(playerContainerRef.current, {
+        videoId: trackVideoId,
+        playerVars: { playsinline: 1, controls: 1, origin: window.location.origin },
+        events: {
+          onReady: () => {
+            if (currentVideoIdRef.current !== trackVideoId) return
+            player.setVolume(volume)
+            setVolume(player.getVolume?.() || volume)
+            setIsMuted(Boolean(player.isMuted?.()))
+            if (playRequestRef.current?.videoId === trackVideoId) player.playVideo()
+          },
+          onStateChange: (event) => {
+            if (currentVideoIdRef.current !== trackVideoId) return
+            if (event.data === youtube.PlayerState.PLAYING) {
+              setIsPlaying(true)
+              setIsBuffering(false)
+              onTrackStarted?.(currentTrackRef.current)
+              startProgressPolling()
+            } else if (event.data === youtube.PlayerState.BUFFERING) {
+              setIsPlaying(false)
+              setIsBuffering(true)
+              stopProgressPolling()
+            } else if (event.data === youtube.PlayerState.PAUSED) {
+              setIsPlaying(false)
+              setIsBuffering(false)
+              stopProgressPolling()
+              updateProgress()
+            } else if (event.data === youtube.PlayerState.ENDED) {
+              setIsPlaying(false)
+              setIsBuffering(false)
+              stopProgressPolling()
+              setProgress(100)
+              updateProgress()
+              handleEnded()
+            } else if (event.data === youtube.PlayerState.CUED) {
+              setIsPlaying(false)
+              setIsBuffering(false)
+              stopProgressPolling()
+              setCurrentTime(0)
+              setProgress(0)
+            }
+          },
+          onError: () => {
+            if (currentVideoIdRef.current !== trackVideoId) return
+            stopProgressPolling()
+            setIsPlaying(false)
+            setIsBuffering(false)
+          },
+        },
+      })
+      youtubePlayerRef.current = player
+      currentVideoIdRef.current = trackVideoId
+    })
+    return () => { cancelled = true }
+  }, [handleEnded, hasVideoId, onTrackStarted, startProgressPolling, stopProgressPolling, updateProgress, videoId, volume])
+
+  useEffect(() => {
+    const player = youtubePlayerRef.current
+    if (!videoId || !player || currentVideoIdRef.current === videoId) return
+    currentVideoIdRef.current = videoId
+    setIsPlaying(false)
+    setIsBuffering(false)
+    setCurrentTime(0)
+    setDuration(0)
+    setProgress(0)
+    stopProgressPolling()
+    player.loadVideoById(videoId)
+    if (playRequest?.videoId === videoId) player.playVideo()
+  }, [playRequest?.videoId, stopProgressPolling, videoId])
+
+  useEffect(() => () => {
+    stopProgressPolling()
+    youtubePlayerRef.current?.destroy()
+    youtubePlayerRef.current = null
+  }, [stopProgressPolling])
+
+  const handleTogglePlay = () => {
+    const player = youtubePlayerRef.current
+    if (!player || !window.YT) return
+    const state = player.getPlayerState()
+    if (state === window.YT.PlayerState.PLAYING) player.pauseVideo()
+    else player.playVideo()
   }
 
-  return <>
-    <section className="player-dock" aria-label="Music player">
-      <div className="player-dock-inner">
-        <div className="player-current" role="button" tabIndex="0" onClick={openExpanded} onKeyDown={handleKeyDown}>
-          <PlayerArtwork song={song} />
-          <span className="player-track"><strong>{song.title}</strong><small>{song.artist}</small></span>
-        </div>
-        <div className="player-controls">
-          <button type="button" className="player-icon-button player-skip" aria-label="Previous song" onClick={onPrevious}><SkipBack size={17} fill="currentColor" /></button>
-          <button type="button" className="player-main-button" aria-label={isPlaying ? 'Pause song' : 'Play song'} onClick={onTogglePlay}>{isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button>
-          <button type="button" className="player-icon-button player-skip" aria-label="Next song" onClick={onNext}><SkipForward size={17} fill="currentColor" /></button>
-        </div>
-        <div className="player-progress-wrap">
-          <span>{formatTime(progress)}</span>
-          <input className="player-progress" type="range" min="0" max={song.seconds} value={progress} onChange={(event) => onSeek(Number(event.target.value))} aria-label="Playback progress" style={{ '--progress': `${(progress / song.seconds) * 100}%` }} />
-          <span>{song.duration}</span>
-        </div>
-        <button type="button" className="player-expand-button" aria-label="Open full player" onClick={openExpanded}><Maximize2 size={17} /></button>
-      </div>
-    </section>
+  const handleSeek = (event) => {
+    const nextProgress = Number(event.target.value)
+    const targetTime = (nextProgress / 100) * duration
+    setProgress(Number.isFinite(nextProgress) ? nextProgress : 0)
+    if (youtubePlayerRef.current && Number.isFinite(targetTime)) youtubePlayerRef.current.seekTo(targetTime, true)
+  }
 
-    {isExpanded && <div className="player-overlay" role="presentation" onClick={closeExpanded}>
-      <section className="expanded-player" role="dialog" aria-modal="true" aria-label={`${song.title} player`} onClick={(event) => event.stopPropagation()}>
-        <header className="expanded-header"><button type="button" className="expanded-close" aria-label="Close player" onClick={closeExpanded}><ChevronDown size={21} /></button><span>NOW PLAYING</span><button type="button" className="expanded-queue-label" aria-label="Queue"><ListMusic size={19} /></button></header>
-        <div className="expanded-content">
-          <PlayerArtwork song={song} large />
-          <p className="expanded-eyebrow">KROVI SESSION</p>
-          <h2>{song.title}</h2><p className="expanded-artist">{song.artist}</p>
-          <div className="expanded-progress"><input className="player-progress" type="range" min="0" max={song.seconds} value={progress} onChange={(event) => onSeek(Number(event.target.value))} aria-label="Playback progress" style={{ '--progress': `${(progress / song.seconds) * 100}%` }} /><div><span>{formatTime(progress)}</span><span>{song.duration}</span></div></div>
-          <div className="expanded-controls"><button type="button" aria-label="Previous song" onClick={onPrevious}><SkipBack size={22} fill="currentColor" /></button><button type="button" className="expanded-play" aria-label={isPlaying ? 'Pause song' : 'Play song'} onClick={onTogglePlay}>{isPlaying ? <Pause size={25} fill="currentColor" /> : <Play size={25} fill="currentColor" />}</button><button type="button" aria-label="Next song" onClick={onNext}><SkipForward size={22} fill="currentColor" /></button></div>
-        </div>
-        <aside className="queue-panel"><div className="queue-heading"><div><p className="expanded-eyebrow">UP NEXT</p><h3>Your queue</h3></div><span>{queue.length} songs</span></div>{queue.length ? <div className="queue-list">{queue.map((queuedSong) => <button type="button" className="queue-song" key={queuedSong.title} onClick={() => { onSelectSong(queuedSong); closeExpanded() }}><PlayerArtwork song={queuedSong} /><span><strong>{queuedSong.title}</strong><small>{queuedSong.artist}</small></span><em>{queuedSong.duration}</em></button>)}</div> : <p className="queue-empty">Your queue is clear.</p>}</aside>
-      </section>
-    </div>}
+  const handleVolume = (event) => {
+    const nextVolume = Math.max(0, Math.min(100, Number(event.target.value) || 0))
+    setVolume(nextVolume)
+    volumeBeforeMuteRef.current = nextVolume || volumeBeforeMuteRef.current
+    youtubePlayerRef.current?.setVolume(nextVolume)
+    if (nextVolume > 0 && youtubePlayerRef.current?.isMuted?.()) youtubePlayerRef.current.unMute()
+    setIsMuted(nextVolume === 0)
+  }
+
+  const handleMute = () => {
+    const player = youtubePlayerRef.current
+    if (!player) return
+    if (player.isMuted()) {
+      player.unMute()
+      const restoredVolume = volumeBeforeMuteRef.current || 80
+      player.setVolume(restoredVolume)
+      setVolume(restoredVolume)
+      setIsMuted(false)
+    } else {
+      volumeBeforeMuteRef.current = volume || 80
+      player.mute()
+      setIsMuted(true)
+    }
+  }
+
+  const handleMiniPlayerPointerDown = (event) => {
+    if (event.target.closest('button, a, input')) return
+    const panel = event.currentTarget
+    const rect = panel.getBoundingClientRect()
+    panel.setPointerCapture?.(event.pointerId)
+    miniPlayerDragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top }
+    setMiniPlayerPosition({ left: rect.left, top: rect.top })
+  }
+
+  const handleMiniPlayerPointerMove = (event) => {
+    const drag = miniPlayerDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const width = event.currentTarget.getBoundingClientRect().width
+    const height = event.currentTarget.getBoundingClientRect().height
+    setMiniPlayerPosition({ left: Math.max(12, Math.min(event.clientX - drag.offsetX, window.innerWidth - width - 12)), top: Math.max(12, Math.min(event.clientY - drag.offsetY, window.innerHeight - height - 12)) })
+  }
+
+  const handleMiniPlayerPointerUp = (event) => {
+    if (miniPlayerDragRef.current?.pointerId !== event.pointerId) return
+    event.currentTarget.releasePointerCapture?.(event.pointerId)
+    miniPlayerDragRef.current = null
+  }
+
+  const cycleRepeat = () => setRepeatMode((mode) => mode === 'OFF' ? 'ONE' : mode === 'ONE' ? 'ALL' : 'OFF')
+  const hasPrevious = currentQueueIndex > 0 || repeatMode === 'ALL'
+  const hasNext = queue.length > 0 && (currentQueueIndex < queue.length - 1 || repeatMode === 'ALL' || (shuffle && queue.length > 1))
+  const isLiked = likedTracks?.some((track) => track.videoId === currentTrack?.videoId)
+  const playIcon = isBuffering ? <LoaderCircle className="player-spinner" size={17} /> : isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />
+  const expandedPlayIcon = isBuffering ? <LoaderCircle className="player-spinner" size={25} /> : isPlaying ? <Pause size={25} fill="currentColor" /> : <Play size={25} fill="currentColor" />
+
+  if (!currentTrack) return null
+  const secondaryControls = <>
+    <button type="button" className={`player-icon-button ${shuffle ? 'active' : ''}`} aria-label={shuffle ? 'Disable shuffle' : 'Enable shuffle'} title="Shuffle" onClick={() => setShuffle((enabled) => !enabled)}><Shuffle size={16} /></button>
+    <button type="button" className="player-icon-button player-skip" aria-label="Previous song" title="Previous" disabled={!hasPrevious} onClick={previousTrack}><SkipBack size={17} fill="currentColor" /></button>
+    <button type="button" className="player-icon-button player-skip" aria-label="Next song" title="Next" disabled={!hasNext} onClick={nextTrack}><SkipForward size={17} fill="currentColor" /></button>
+    <button type="button" className={`player-icon-button ${repeatMode !== 'OFF' ? 'active' : ''}`} aria-label={`Repeat ${repeatMode.toLowerCase()}`} title={`Repeat ${repeatMode.toLowerCase()}`} onClick={cycleRepeat}><Repeat2 size={17} /><small className={repeatMode === 'ONE' ? 'repeat-one' : ''}>{repeatMode === 'ONE' ? '1' : ''}</small></button>
+  </>
+  const likeButton = <><button type="button" className={`player-icon-button heart-button ${isLiked ? 'liked' : ''}`} aria-label={isLiked ? 'Unlike current song' : 'Like current song'} title={isLiked ? 'Unlike' : 'Like'} onClick={() => onToggleLike?.(currentTrack)}><Heart size={17} fill={isLiked ? 'currentColor' : 'none'} /></button><button type="button" className="player-icon-button" aria-label="Add current song to playlist" title="Add to playlist" onClick={() => onRequestPlaylist?.(currentTrack)}><ListMusic size={17} /></button></>
+  const dockControls = <><div className="secondary-controls">{secondaryControls}</div><button type="button" className="player-main-button" aria-label={isPlaying ? 'Pause song' : 'Play song'} onClick={handleTogglePlay}>{playIcon}</button>{likeButton}</>
+
+  return <>
+    {videoId && <section className={`youtube-player-panel ${hiddenMiniPlayerVideoId === videoId ? 'is-hidden' : ''}`} aria-label="YouTube mini player" style={miniPlayerPosition ? { left: `${miniPlayerPosition.left}px`, top: `${miniPlayerPosition.top}px`, right: 'auto', bottom: 'auto' } : undefined} onPointerDown={handleMiniPlayerPointerDown} onPointerMove={handleMiniPlayerPointerMove} onPointerUp={handleMiniPlayerPointerUp} onPointerCancel={handleMiniPlayerPointerUp}><div ref={playerContainerRef} className="youtube-player-container" /><div className="youtube-mini-overlay"><button type="button" className="mini-player-expand" aria-label="Expand player" onClick={() => setIsExpanded(true)}><Maximize2 size={16} /></button><button type="button" className="mini-player-close" aria-label="Close mini player" onClick={() => setHiddenMiniPlayerVideoId(videoId)}><X size={16} /></button></div></section>}
+    <section className="player-dock" aria-label="Music player"><div className="player-dock-inner"><div className="player-current" role="button" tabIndex="0" onClick={() => setIsExpanded(true)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setIsExpanded(true) }}><PlayerArtwork track={currentTrack} /><span className="player-track"><strong>{currentTrack.title}</strong><small>{currentTrack.artist}</small></span></div><div className="player-controls">{dockControls}</div><div className="player-progress-wrap"><span>{formatTime(currentTime)}</span><input className="player-progress" type="range" min="0" max="100" step="0.1" value={Number.isFinite(progress) ? progress : 0} onChange={handleSeek} aria-label="Playback progress" style={{ '--progress': `${progress}%` }} /><span>{formatTime(duration)}</span></div><div className="volume-control"><button type="button" className="player-icon-button" aria-label={isMuted ? 'Unmute' : 'Mute'} title={isMuted ? 'Unmute' : 'Mute'} onClick={handleMute}>{isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><input type="range" min="0" max="100" step="1" value={isMuted ? 0 : volume} onChange={handleVolume} aria-label="Volume" /></div><button type="button" className="player-expand-button" aria-label="Open full player" title="Open full player" onClick={() => setIsExpanded(true)}><Maximize2 size={17} /></button></div></section>
+    {isExpanded && <div className="player-overlay" role="presentation" onClick={() => setIsExpanded(false)}><section className="expanded-player" role="dialog" aria-modal="true" aria-label={`${currentTrack.title} player`} onClick={(event) => event.stopPropagation()}><header className="expanded-header"><button type="button" className="expanded-close" aria-label="Close player" onClick={() => setIsExpanded(false)}><ChevronDown size={21} /></button><span>NOW PLAYING</span><button type="button" className="expanded-queue-label" aria-label="Queue"><ListMusic size={19} /></button></header><div className="expanded-content"><PlayerArtwork track={currentTrack} large /><p className="expanded-eyebrow">KROVI SESSION</p><h2>{currentTrack.title}</h2><p className="expanded-artist">{currentTrack.artist}</p>{likeButton}<div className="expanded-progress"><input className="player-progress" type="range" min="0" max="100" step="0.1" value={Number.isFinite(progress) ? progress : 0} onChange={handleSeek} aria-label="Playback progress" style={{ '--progress': `${progress}%` }} /><div><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div></div><div className="expanded-controls">{secondaryControls}<button type="button" className="expanded-play" aria-label={isPlaying ? 'Pause song' : 'Play song'} onClick={handleTogglePlay}>{expandedPlayIcon}</button></div><div className="expanded-volume"><button type="button" className="player-icon-button" aria-label={isMuted ? 'Unmute' : 'Mute'} onClick={handleMute}>{isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button><input type="range" min="0" max="100" step="1" value={isMuted ? 0 : volume} onChange={handleVolume} aria-label="Volume" /></div></div><aside className="queue-panel"><div className="queue-heading"><div><p className="expanded-eyebrow">UP NEXT</p><h3>Your queue</h3></div><button type="button" className="queue-clear" onClick={onClearQueue}>Clear queue</button></div><div className="queue-current"><PlayerArtwork track={currentTrack} /><span><strong>{currentTrack.title}</strong><small>{currentTrack.artist}</small></span></div>{queue.length > 1 ? <div className="queue-list">{queue.filter((_, index) => index !== currentQueueIndex).map((queuedTrack, index) => <div className="queue-song" key={`${queuedTrack.videoId || queuedTrack.title}-${index}`}><button type="button" className="queue-song-main" onClick={() => { playTrack(queuedTrack, { autoplay: true, queue }); setIsExpanded(false) }}><PlayerArtwork track={queuedTrack} /><span><strong>{queuedTrack.title}</strong><small>{queuedTrack.artist}</small></span></button><button type="button" className="queue-remove" aria-label={`Remove ${queuedTrack.title} from queue`} title="Remove from queue" onClick={() => onRemoveFromQueue?.(queuedTrack.videoId)}><Trash2 size={15} /></button><button type="button" className="queue-remove" aria-label={`Add ${queuedTrack.title} to playlist`} title="Add to playlist" onClick={() => onRequestPlaylist?.(queuedTrack)}><ListMusic size={15} /></button></div>)}</div> : <p className="queue-empty">Your queue is clear.</p>}</aside></section></div>}
   </>
 }
 

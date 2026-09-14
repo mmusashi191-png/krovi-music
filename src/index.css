@@ -7,6 +7,9 @@
   -webkit-font-smoothing: antialiased;
 }
 
+.app-shell button, .app-shell a, .app-shell input { -webkit-tap-highlight-color: transparent; }
+.app-shell button:focus-visible, .app-shell a:focus-visible, .app-shell input:focus-visible { outline: 2px solid #db7180; outline-offset: 3px; }
+
 body {
   margin: 0;
   min-width: 320px;
