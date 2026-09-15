@@ -45,10 +45,9 @@ export default function Playlists({ playlists, savedTracks = [], recentTracks = 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({ name: '', description: '', coverImage: '' })
-  const [formError, setFormError] = useState('')
   const selected = playlists.find((playlist) => playlist.id === selectedId)
-  const openCreate = () => { setForm({ name: '', description: '', coverImage: '' }); setFormError(''); setEditing(null); setIsCreateOpen(true) }
-  const submit = (event) => { event.preventDefault(); const name = form.name.trim(); if (!name) { setFormError('Give your playlist a name.'); return } if (editing) onUpdate(editing.id, { ...form, name: name.slice(0, 60) }); else onCreate({ ...form, name: name.slice(0, 60) }); setIsCreateOpen(false); setFormError('') }
+  const openCreate = () => { setForm({ name: '', description: '', coverImage: '' }); setEditing(null); setIsCreateOpen(true) }
+  const submit = (event) => { event.preventDefault(); const name = form.name.trim(); if (!name) return; if (editing) onUpdate(editing.id, { ...form, name: name.slice(0, 60) }); else onCreate({ ...form, name: name.slice(0, 60) }); setIsCreateOpen(false) }
   useEffect(() => {
     const closeOnEscape = (event) => { if (event.key === 'Escape' && isCreateOpen) setIsCreateOpen(false) }
     window.addEventListener('keydown', closeOnEscape)
