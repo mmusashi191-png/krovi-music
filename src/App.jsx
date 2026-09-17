@@ -107,6 +107,7 @@ function App() {
   const [connectError, setConnectError] = useState('')
   const connectRemoteSignatureRef = useRef(null)
   const connectRevisionRef = useRef(0)
+  const connectSyncRequestedRef = useRef(false)
   const playbackRef = useRef(playback)
   const { currentTrack, queue, currentQueueIndex } = playback
   useEffect(() => { playbackRef.current = playback }, [playback])
@@ -122,128 +123,180 @@ function App() {
   useEffect(() => { window.localStorage.setItem(ACTIVE_VIEW_STORAGE_KEY, activeView) }, [activeView])
 
   useEffect(() => {
-    if (!connectRoom?.roomCode) return undefined
+  if (!connectRoom?.roomCode) return undefined
 
-    let active = true
-    let unsubscribeRoom
-    let unsubscribePresence
-    connectRevisionRef.current = 0
+  let active = true
+  let unsubscribeRoom
+  let unsubscribePresence
 
-    try {
-      unsubscribeRoom = subscribeToRoom(connectRoom.roomCode, (roomData) => {
-        if (roomData?.type === 'error') {
-          setConnectError(roomData.message || connectConfigMessage)
-          return
-        }
+  connectRevisionRef.current = 0
 
-        if (!active || !roomData) return
+  try {
+    unsubscribeRoom = subscribeToRoom(connectRoom.roomCode, (roomData) => {
+      if (roomData?.type === 'error') {
+        setConnectError(roomData.message || connectConfigMessage)
+        return
+      }
 
-        const syncVersion = Number(roomData.syncVersion) || 0
-        if (syncVersion && syncVersion <= connectRevisionRef.current) return
-        if (syncVersion) connectRevisionRef.current = syncVersion
+      if (!active || !roomData) return
 
-        const nextTrack = isPlayableTrack(roomData.activeVideoMetadata)
-          ? normalizeTrack(roomData.activeVideoMetadata)
-          : null
-        const remoteIsPlaying = Boolean(roomData.isPlaying)
-        const seekPosition = Number(roomData.seekPosition)
-        const serverPosition = Number.isFinite(seekPosition) && typeof roomData.seekId === 'string'
-          ? Math.max(0, seekPosition)
-          : Number(roomData.playbackPosition) || 0
-        const updatedAt = Number(roomData.updatedAt) || 0
-        const remoteCurrentTime = remoteIsPlaying && updatedAt
-          ? serverPosition + Math.max(0, (Date.now() - updatedAt) / 1000)
-          : serverPosition
-        const remoteSeekId = typeof roomData.seekId === 'string' && roomData.seekId ? roomData.seekId : null
-        const remoteQueue = Array.isArray(roomData.queue)
-          ? roomData.queue.filter(isPlayableTrack).map(normalizeTrack)
-          : []
+      const syncVersion = Number(roomData.syncVersion) || 0
 
-        connectRemoteSignatureRef.current = JSON.stringify({
-          track: nextTrack?.videoId || null,
+      if (syncVersion && syncVersion <= connectRevisionRef.current) {
+        return
+      }
+
+      if (syncVersion) {
+        connectRevisionRef.current = syncVersion
+      }
+
+      const nextTrack = isPlayableTrack(roomData.activeVideoMetadata)
+        ? normalizeTrack(roomData.activeVideoMetadata)
+        : null
+
+      const remoteIsPlaying = Boolean(roomData.isPlaying)
+
+      const playbackPosition = Number(roomData.playbackPosition)
+      const seekPosition = Number(roomData.seekPosition)
+
+      const basePosition =
+        Number.isFinite(seekPosition) && seekPosition >= 0
+          ? seekPosition
+          : Number.isFinite(playbackPosition)
+            ? Math.max(0, playbackPosition)
+            : 0
+
+      const updatedAt = Number(roomData.updatedAt) || Date.now()
+
+      const remoteCurrentTime = remoteIsPlaying
+        ? basePosition + Math.max(0, (Date.now() - updatedAt) / 1000)
+        : basePosition
+
+      const remoteQueue = Array.isArray(roomData.queue)
+        ? roomData.queue
+            .filter(isPlayableTrack)
+            .map(normalizeTrack)
+        : []
+
+      /*
+       * Every server state update represents a new authoritative
+       * playback position. The receiving player should apply that
+       * position exactly once.
+       */
+      const remoteSyncToken = `room-${syncVersion || updatedAt}`
+
+      connectRemoteSignatureRef.current = JSON.stringify({
+        track: nextTrack?.videoId || null,
+        isPlaying: remoteIsPlaying,
+        queue: remoteQueue.map((track) => track.videoId),
+        syncToken: remoteSyncToken,
+      })
+
+      setPlayback((current) => {
+        const sameTrack =
+          current.currentTrack?.videoId === nextTrack?.videoId
+
+        return {
+          ...current,
+          currentTrack: nextTrack,
+          queue: remoteQueue,
+          currentQueueIndex: nextTrack
+            ? Math.max(
+                0,
+                remoteQueue.findIndex(
+                  (track) => track.videoId === nextTrack.videoId
+                )
+              )
+            : -1,
           isPlaying: remoteIsPlaying,
-          queue: remoteQueue.map((track) => track.videoId),
-          seekToken: remoteSeekId,
-        })
+          currentTime: remoteCurrentTime,
+          seekRequest: nextTrack
+            ? {
+                videoId: nextTrack.videoId,
+                time: remoteCurrentTime,
+                token: remoteSyncToken,
+                remote: true,
+              }
+            : null,
+          duration: sameTrack ? current.duration : 0,
+          playerVisible: Boolean(nextTrack),
+          isLoading: false,
+          error: '',
+        }
+      })
 
-        setPlayback((current) => {
-          const sameTrack = current.currentTrack?.videoId === nextTrack?.videoId
-          return {
-            ...current,
-            currentTrack: nextTrack,
-            queue: remoteQueue,
-            currentQueueIndex: nextTrack
-              ? Math.max(0, remoteQueue.findIndex((track) => track.videoId === nextTrack.videoId))
-              : -1,
-            isPlaying: remoteIsPlaying,
-            currentTime: remoteCurrentTime,
-            seekRequest: remoteSeekId
-  ? {
-      videoId: nextTrack?.videoId || '',
-      time: Number.isFinite(seekPosition) ? seekPosition : remoteCurrentTime,
-      token: remoteSeekId,
-      remote: true,
-    }
-  : null,
-            duration: sameTrack ? current.duration : 0,
-            playerVisible: Boolean(nextTrack),
-            isLoading: Boolean(nextTrack && remoteIsPlaying),
-            error: '',
-          }
-        })
+      if (nextTrack) {
+        const currentVideoId =
+          playbackRef.current.currentTrack?.videoId || ''
 
-        if (nextTrack && nextTrack.videoId !== playbackRef.current.currentTrack?.videoId) {
-          setPlayRequest({ videoId: nextTrack.videoId, token: Date.now() })
+        if (nextTrack.videoId !== currentVideoId) {
+          setPlayRequest({
+            videoId: nextTrack.videoId,
+            token: Date.now(),
+            autoplay: remoteIsPlaying,
+          })
         } else {
+          /*
+           * Same song: the player already exists.
+           * isPlaying + seekRequest will control it.
+           */
           setPlayRequest(null)
         }
-      })
+      } else {
+        setPlayRequest(null)
+      }
+    })
 
-      unsubscribePresence = subscribeToPresence(connectRoom.roomCode, (presence) => {
-        if (active) setConnectRoom((current) => current ? { ...current, ...presence } : current)
-      })
-    } catch (error) {
-      window.setTimeout(() => {
-        if (!active) return
-        setConnectError(error.code === 'CONNECT_NOT_CONFIGURED' ? connectConfigMessage : 'Connect could not start.')
-      }, 0)
-    }
+    unsubscribePresence = subscribeToPresence(
+      connectRoom.roomCode,
+      (presence) => {
+        if (active) {
+          setConnectRoom((current) =>
+            current ? { ...current, ...presence } : current
+          )
+        }
+      }
+    )
+  } catch (error) {
+    window.setTimeout(() => {
+      if (!active) return
 
-    return () => {
-      active = false
-      unsubscribeRoom?.()
-      unsubscribePresence?.()
-    }
-  }, [connectRoom?.roomCode])
+      setConnectError(
+        error.code === 'CONNECT_NOT_CONFIGURED'
+          ? connectConfigMessage
+          : 'Connect could not start.'
+      )
+    }, 0)
+  }
+
+  return () => {
+    active = false
+    unsubscribeRoom?.()
+    unsubscribePresence?.()
+  }
+}, [connectRoom?.roomCode])
 
   useEffect(() => {
-    if (!connectRoom?.roomCode) return undefined
-    if (!connectSyncRequestedRef.current) return undefined
+  if (!connectRoom?.roomCode) return undefined
+  if (!connectSyncRequestedRef.current) return undefined
 
-    connectSyncRequestedRef.current = false
+  connectSyncRequestedRef.current = false
 
-    const timer = window.setTimeout(() => {
-      const outgoingPlayback = playbackRef.current
+  const timer = window.setTimeout(() => {
+    const outgoingPlayback = playbackRef.current
 
-      updatePlaybackState(connectRoom.roomCode, outgoingPlayback)
-        .then(() => {
-          if (!outgoingPlayback.seekRequest?.token) return
+    updatePlaybackState(connectRoom.roomCode, outgoingPlayback)
+      .catch(() => {
+        setConnectError('Connect lost its network connection.')
+      })
+  }, 80)
 
-          setPlayback((current) =>
-            current.seekRequest?.token === outgoingPlayback.seekRequest.token
-              ? { ...current, seekRequest: null }
-              : current
-          )
-        })
-        .catch(() => setConnectError('Connect lost its network connection.'))
-    }, 80)
-
-    return () => window.clearTimeout(timer)
-  }, [
-    connectRoom?.roomCode,
-    playback.currentTrack?.videoId,
-    playback.isPlaying,
-    playback.seekRequest?.token,
+  return () => window.clearTimeout(timer)
+}, [
+  connectRoom?.roomCode,
+  playback.currentTrack?.videoId,
+  playback.isPlaying,
+  playback.seekRequest?.token,
   ])
 
   useEffect(() => {
@@ -305,7 +358,7 @@ function App() {
     setPlayback((current) => ({ ...current, queue: current.currentTrack ? [current.currentTrack] : [], currentQueueIndex: current.currentTrack ? 0 : -1 }))
   }
 
-  const connectSyncRequestedRef = useRef(false)
+
 
   const updatePlayback = (changes, options = {}) => {
     if (options.sync !== false) {
