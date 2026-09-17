@@ -48,6 +48,7 @@ function Player({ playback, currentTrack, queue, currentQueueIndex, playRequest,
   const [repeatMode, setRepeatMode] = useState('OFF')
   const playerContainerRef = useRef(null)
   const youtubePlayerRef = useRef(null)
+  const seekTokenRef = useRef(0)
   const progressTimerRef = useRef(null)
   const currentVideoIdRef = useRef('')
   const currentTrackRef = useRef(currentTrack)
@@ -57,9 +58,10 @@ function Player({ playback, currentTrack, queue, currentQueueIndex, playRequest,
   const repeatModeRef = useRef(repeatMode)
   const playRequestRef = useRef(playRequest)
   const volumeBeforeMuteRef = useRef(volume)
+  const volumeRef = useRef(volume)
   const miniPlayerDragRef = useRef(null)
   const miniPlayerPanelRef = useRef(null)
-  const { isPlaying, currentTime, duration, pipVisible, pipPosition, isLoading: isBuffering } = playback
+  const { isPlaying, currentTime, duration, pipVisible, pipPosition, seekRequest, isLoading: isBuffering } = playback
   const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0
 
   useEffect(() => {
@@ -79,6 +81,7 @@ function Player({ playback, currentTrack, queue, currentQueueIndex, playRequest,
   useEffect(() => { shuffleRef.current = shuffle }, [shuffle])
   useEffect(() => { repeatModeRef.current = repeatMode }, [repeatMode])
   useEffect(() => { playRequestRef.current = playRequest }, [playRequest])
+  useEffect(() => { volumeRef.current = volume }, [volume])
 
   useEffect(() => {
     const clampMiniPlayer = () => onPlaybackChange({ pipPosition: playback.pipPosition && (() => {
@@ -127,7 +130,16 @@ function Player({ playback, currentTrack, queue, currentQueueIndex, playRequest,
     queueIndexRef.current = nextIndex
     currentTrackRef.current = track
     currentVideoIdRef.current = track.videoId
-    onPlaybackChange({ isPlaying: false, isLoading: Boolean(options.autoplay), currentTime: 0, duration: 0, error: '' })
+    onPlaybackChange(
+      {
+        isPlaying: Boolean(options.autoplay),
+        isLoading: Boolean(options.autoplay),
+        currentTime: 0,
+        duration: 0,
+        error: '',
+      },
+      { sync: true }
+    )
     stopProgressPolling()
     const player = youtubePlayerRef.current
     if (player) {
@@ -188,59 +200,124 @@ function Player({ playback, currentTrack, queue, currentQueueIndex, playRequest,
 
   useEffect(() => {
     if (!hasVideoId || youtubePlayerRef.current || !playerContainerRef.current) return undefined
+
     let cancelled = false
     const trackVideoId = videoId
+
     loadYouTubeApi().then((youtube) => {
       if (cancelled || youtubePlayerRef.current || !playerContainerRef.current) return
+
       const player = new youtube.Player(playerContainerRef.current, {
         videoId: trackVideoId,
-        playerVars: { playsinline: 1, controls: 1, origin: window.location.origin },
+        playerVars: {
+          playsinline: 1,
+          controls: 1,
+          origin: window.location.origin,
+        },
         events: {
           onReady: () => {
-            if (currentVideoIdRef.current !== trackVideoId) return
-            player.setVolume(volume)
-            setVolume(player.getVolume?.() || volume)
+            if (cancelled || currentVideoIdRef.current !== trackVideoId) return
+
+            player.setVolume(volumeRef.current ?? 80)
+            setVolume(player.getVolume?.() || volumeRef.current || 80)
             setIsMuted(Boolean(player.isMuted?.()))
-            if (playback.currentTime > 0) player.seekTo(playback.currentTime, true)
-            if (playRequestRef.current?.videoId === trackVideoId) player.playVideo()
-          },
-          onStateChange: (event) => {
-            if (currentVideoIdRef.current !== trackVideoId) return
-            if (event.data === youtube.PlayerState.PLAYING) {
-              onPlaybackChange({ isPlaying: true, isLoading: false })
-              onTrackStarted?.(currentTrackRef.current)
-              startProgressPolling()
-            } else if (event.data === youtube.PlayerState.BUFFERING) {
-              onPlaybackChange({ isPlaying: false, isLoading: true })
-              stopProgressPolling()
-            } else if (event.data === youtube.PlayerState.PAUSED) {
-              onPlaybackChange({ isPlaying: false, isLoading: false })
-              stopProgressPolling()
-              updateProgress()
-            } else if (event.data === youtube.PlayerState.ENDED) {
-              onPlaybackChange({ isPlaying: false, isLoading: false })
-              stopProgressPolling()
-              onPlaybackChange({ currentTime: duration || currentTime })
-              updateProgress()
-              handleEnded()
-            } else if (event.data === youtube.PlayerState.CUED) {
-              onPlaybackChange({ isPlaying: false, isLoading: false })
-              stopProgressPolling()
-              onPlaybackChange({ currentTime: 0, duration: 0 })
+
+            const request = playRequestRef.current
+
+            if (
+              request?.videoId === trackVideoId &&
+              request.autoplay
+            ) {
+              player.playVideo()
             }
           },
+
+          onStateChange: (event) => {
+            if (currentVideoIdRef.current !== trackVideoId) return
+
+            if (event.data === youtube.PlayerState.PLAYING) {
+              onPlaybackChange(
+                { isPlaying: true, isLoading: false },
+                { sync: false }
+              )
+              onTrackStarted?.(currentTrackRef.current)
+              startProgressPolling()
+            }
+
+            else if (event.data === youtube.PlayerState.BUFFERING) {
+              onPlaybackChange(
+                { isLoading: true },
+                { sync: false }
+              )
+              stopProgressPolling()
+            }
+
+            else if (event.data === youtube.PlayerState.PAUSED) {
+              onPlaybackChange(
+                { isPlaying: false, isLoading: false },
+                { sync: false }
+              )
+              stopProgressPolling()
+              updateProgress()
+            }
+
+            else if (event.data === youtube.PlayerState.ENDED) {
+              onPlaybackChange(
+                { isPlaying: false, isLoading: false },
+                { sync: false }
+              )
+              stopProgressPolling()
+              updateProgress()
+              handleEnded()
+            }
+
+            else if (event.data === youtube.PlayerState.CUED) {
+              onPlaybackChange(
+                { isPlaying: false, isLoading: false },
+                { sync: false }
+              )
+              stopProgressPolling()
+              onPlaybackChange(
+                { currentTime: 0, duration: 0 },
+                { sync: false }
+              )
+            }
+          },
+
           onError: () => {
             if (currentVideoIdRef.current !== trackVideoId) return
+
             stopProgressPolling()
-            onPlaybackChange({ isPlaying: false, isLoading: false, error: 'YouTube could not play this video.' })
+
+            onPlaybackChange(
+              {
+                isPlaying: false,
+                isLoading: false,
+                error: 'YouTube could not play this video.',
+              },
+              { sync: false }
+            )
           },
         },
       })
+
       youtubePlayerRef.current = player
       currentVideoIdRef.current = trackVideoId
     })
-    return () => { cancelled = true }
-  }, [currentTime, duration, handleEnded, hasVideoId, onPlaybackChange, onTrackStarted, playback.currentTime, startProgressPolling, stopProgressPolling, updateProgress, videoId, volume])
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    hasVideoId,
+    videoId,
+    onPlaybackChange,
+    onTrackStarted,
+    handleEnded,
+    startProgressPolling,
+    stopProgressPolling,
+    updateProgress,
+  ])
 
   useEffect(() => {
     const player = youtubePlayerRef.current
@@ -252,6 +329,34 @@ function Player({ playback, currentTrack, queue, currentQueueIndex, playRequest,
     if (playRequest?.videoId === videoId) player.playVideo()
   }, [onPlaybackChange, playRequest?.videoId, stopProgressPolling, videoId])
 
+  useEffect(() => {
+    const player = youtubePlayerRef.current
+
+    if (!player || !videoId || !window.YT?.PlayerState) {
+      return
+    }
+
+    const playerState = player.getPlayerState?.()
+
+    if (isPlaying) {
+      if (
+        playerState !== window.YT.PlayerState.PLAYING &&
+        playerState !== window.YT.PlayerState.BUFFERING
+      ) {
+        player.playVideo()
+      }
+    } else if (playerState === window.YT.PlayerState.PLAYING) {
+      player.pauseVideo()
+    }
+  }, [isPlaying, videoId])
+
+  useEffect(() => {
+    const request = seekRequest
+    const player = youtubePlayerRef.current
+    if (!request?.remote || request.videoId !== videoId || !Number.isFinite(request.time) || !player?.seekTo) return
+    player.seekTo(request.time, true)
+  }, [seekRequest, videoId])
+
   useEffect(() => () => {
     stopProgressPolling()
     youtubePlayerRef.current?.destroy()
@@ -261,17 +366,63 @@ function Player({ playback, currentTrack, queue, currentQueueIndex, playRequest,
   const handleTogglePlay = () => {
     const player = youtubePlayerRef.current
     if (!player || !window.YT) return
+
     const state = player.getPlayerState()
-    if (state === window.YT.PlayerState.PLAYING) player.pauseVideo()
-    else player.playVideo()
+
+    if (state === window.YT.PlayerState.PLAYING) {
+      const time = Number(player.getCurrentTime?.()) || 0
+
+      onPlaybackChange(
+        {
+          isPlaying: false,
+          currentTime: time,
+          isLoading: false,
+        },
+        { sync: true }
+      )
+
+      player.pauseVideo()
+    } else {
+      const time = Number(player.getCurrentTime?.()) || 0
+
+      onPlaybackChange(
+        {
+          isPlaying: true,
+          currentTime: time,
+          isLoading: true,
+        },
+        { sync: true }
+      )
+
+      player.playVideo()
+    }
   }
 
   const handleSeek = (event) => {
-    const nextProgress = Number(event.target.value)
-    const targetTime = (nextProgress / 100) * duration
-    onPlaybackChange({ currentTime: targetTime })
-    if (youtubePlayerRef.current && Number.isFinite(targetTime)) youtubePlayerRef.current.seekTo(targetTime, true)
+  const nextProgress = Number(event.target.value)
+  const targetTime = (nextProgress / 100) * duration
+
+  if (!Number.isFinite(targetTime)) return
+
+  const player = youtubePlayerRef.current
+
+  seekTokenRef.current += 1
+  onPlaybackChange(
+    {
+      currentTime: targetTime,
+      seekRequest: {
+        videoId,
+        time: targetTime,
+        token: `${Date.now()}-${seekTokenRef.current}`,
+      },
+    },
+    { sync: true }
+  )
+
+  if (player?.seekTo) {
+    player.seekTo(targetTime, true)
   }
+}
 
   const handleVolume = (event) => {
     const nextVolume = Math.max(0, Math.min(100, Number(event.target.value) || 0))
