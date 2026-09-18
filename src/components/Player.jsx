@@ -456,15 +456,33 @@ const commitSeek = () => {
   if (!Number.isFinite(targetTime)) return
 
   const player = youtubePlayerRef.current
-  const currentPlaying =
-    player?.getPlayerState?.() === window.YT?.PlayerState?.PLAYING
+
+  const playerState = player?.getPlayerState?.()
+  const playingState = window.YT?.PlayerState?.PLAYING
+
+  const wasPlaying =
+    playerState === playingState ||
+    playbackRef.current?.isPlaying === true
 
   seekTokenRef.current += 1
 
+  /*
+   * First tell the local YouTube player to seek to the final
+   * position. Because the user was already playing, YouTube
+   * will continue playing from this position.
+   */
+  if (player?.seekTo) {
+    player.seekTo(targetTime, true)
+  }
+
+  /*
+   * Then publish ONE authoritative seek to the room.
+   * We deliberately do not publish intermediate slider movement.
+   */
   onPlaybackChange(
     {
       currentTime: targetTime,
-      isPlaying: currentPlaying,
+      isPlaying: wasPlaying,
       isLoading: false,
       seekRequest: {
         videoId,
@@ -474,13 +492,6 @@ const commitSeek = () => {
     },
     { sync: true }
   )
-
-  if (player?.seekTo) {
-    /*
-     * true on release = allow YouTube to fetch the new section.
-     */
-    player.seekTo(targetTime, true)
-  }
 }
 
   const handleVolume = (event) => {
