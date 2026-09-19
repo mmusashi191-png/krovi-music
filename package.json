@@ -6,12 +6,16 @@
   "scripts": {
     "dev:client": "vite",
     "dev:server": "node server.cjs",
+    "start": "node server.cjs",
     "dev": "concurrently -k \"node server.cjs\" \"vite --host 0.0.0.0 --port 5173\"",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "lucide-react": "^1.45.0",
