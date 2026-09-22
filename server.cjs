@@ -7,6 +7,19 @@ const { WebSocketServer, WebSocket } = require('ws')
 dotenv.config()
 
 const app = express()
+
+// Allow the Krovi Capacitor Android app to call this API.
+app.use((request, response, next) => {
+  response.setHeader('Access-Control-Allow-Origin', '*')
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+
+  if (request.method === 'OPTIONS') {
+    return response.sendStatus(204)
+  }
+
+  next()
+})
 const port = 8787
 const youtubeSearchEndpoint = 'https://www.googleapis.com/youtube/v3/search'
 const rooms = new Map()
@@ -25,7 +38,7 @@ function send(client, message) {
 }
 
 function roomState(room) {
-  return { roomCode: room.roomCode, hostClientId: room.hostClientId, participantCount: room.participants.size, activeVideoId: room.activeVideoId, activeVideoMetadata: room.activeVideoMetadata, isPlaying: room.isPlaying, playbackPosition: room.playbackPosition, queue: room.queue, updatedAt: room.updatedAt }
+  return { roomCode: room.roomCode, hostClientId: room.hostClientId, participantCount: room.participants.size, activeVideoId: room.activeVideoId, activeVideoMetadata: room.activeVideoMetadata, isPlaying: room.isPlaying, playbackPosition: room.playbackPosition, chatMessages: Array.isArray(room.chatMessages) ? room.chatMessages : [], queue: room.queue, updatedAt: room.updatedAt, syncVersion: room.syncVersion, seekId: room.seekId, seekPosition: room.seekPosition }
 }
 
 function broadcast(room, message, excludedClientId = null) {
@@ -56,7 +69,21 @@ function handleRoomMessage(client, message) {
   const type = message?.type
   if (type === 'create-room') {
     removeClientFromRoom(client)
-    const room = { roomCode: createRoomCode(), hostClientId: client.clientId, participants: new Set([client.clientId]), activeVideoId: message.playback?.currentTrack?.videoId || '', activeVideoMetadata: message.playback?.currentTrack || null, isPlaying: Boolean(message.playback?.isPlaying), playbackPosition: Number(message.playback?.currentTime) || 0, queue: Array.isArray(message.playback?.queue) ? message.playback.queue : [], updatedAt: Date.now() }
+    const room = {
+      roomCode: createRoomCode(),
+      hostClientId: client.clientId,
+      participants: new Set([client.clientId]),
+      activeVideoId: message.playback?.currentTrack?.videoId || '',
+      activeVideoMetadata: message.playback?.currentTrack || null,
+      isPlaying: Boolean(message.playback?.isPlaying),
+      playbackPosition: Number(message.playback?.currentTime) || 0,
+      queue: Array.isArray(message.playback?.queue) ? message.playback.queue : [],
+      chatMessages: [],
+      updatedAt: Date.now(),
+      syncVersion: 0,
+      seekId: null,
+      seekPosition: null,
+    }
     rooms.set(room.roomCode, room)
     client.roomCode = room.roomCode
     send(client, { type: 'room-state', role: 'host', ...roomState(room) })
@@ -79,17 +106,76 @@ function handleRoomMessage(client, message) {
   const room = client.roomCode ? rooms.get(client.roomCode) : null
   if (type === 'leave-room') { removeClientFromRoom(client); send(client, { type: 'presence-update', participantCount: 0 }); return }
   if (!room) return send(client, { type: 'error', code: 'NOT_IN_ROOM', message: 'Join a room before sending room updates.' })
+  if (type === 'chat-message') {
+    const chatText = String(message.text || '').trim().slice(0, 280)
+    if (!chatText) return
+
+    room.chatMessages = Array.isArray(room.chatMessages)
+      ? room.chatMessages
+      : []
+
+    const chatMessage = {
+      id: crypto.randomUUID(),
+      clientId: client.clientId,
+      text: chatText,
+      sentAt: Date.now(),
+    }
+
+    room.chatMessages.push(chatMessage)
+    room.chatMessages = room.chatMessages.slice(-50)
+
+    // Chat is a real room-state revision too.
+    room.updatedAt = Date.now()
+    room.syncVersion += 1
+
+    // Send the new message to everyone immediately.
+    broadcast(room, {
+      type: 'room-state',
+      ...roomState(room),
+    })
+
+    return
+  }
+
   if (type === 'playback-update') {
     room.activeVideoId = message.activeVideoId || ''
     room.activeVideoMetadata = message.activeVideoMetadata || null
     room.isPlaying = Boolean(message.isPlaying)
-    room.playbackPosition = Number(message.playbackPosition) || 0
+    room.playbackPosition = Math.max(0, Number(message.playbackPosition) || 0)
     room.updatedAt = Date.now()
-    broadcast(room, { type: 'room-state', ...roomState(room) }, client.clientId)
+    room.syncVersion += 1
+
+    room.seekId =
+      typeof message.seekId === 'string' && message.seekId.length <= 100
+        ? message.seekId
+        : null
+
+    room.seekPosition =
+      Number.isFinite(Number(message.seekPosition))
+        ? Math.max(0, Number(message.seekPosition))
+        : null
+
+    broadcast(
+      room,
+      { type: 'room-state', ...roomState(room) },
+      client.clientId
+    )
   } else if (type === 'queue-update') {
     room.queue = Array.isArray(message.queue) ? message.queue : []
+
+    /*
+     * Queue changes are also authoritative room changes.
+     * Give them a revision so clients cannot silently keep
+     * an older queue after a newer playback command.
+     */
     room.updatedAt = Date.now()
-    broadcast(room, { type: 'room-state', ...roomState(room) }, client.clientId)
+    room.syncVersion += 1
+
+    broadcast(
+      room,
+      { type: 'room-state', ...roomState(room) },
+      client.clientId
+    )
   }
 }
 
@@ -150,6 +236,8 @@ websocketServer.on('connection', (socket) => {
   socket.on('error', () => { removeClientFromRoom(client); clients.delete(client.clientId) })
 })
 
-server.listen(port, () => {
-  console.log(`YouTube proxy listening on http://localhost:${port}`)
+const PORT = Number(process.env.PORT) || 8787
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Krovi server listening on ${PORT}`)
 })
