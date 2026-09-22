@@ -13,12 +13,11 @@ app.use((request, response, next) => {
   response.setHeader('Access-Control-Allow-Origin', '*')
   response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-
-  if (request.method === 'OPTIONS') {
-    return response.sendStatus(204)
-  }
-
   next()
+})
+
+app.options('/api/youtube/search', (request, response) => {
+  response.sendStatus(204)
 })
 const port = 8787
 const youtubeSearchEndpoint = 'https://www.googleapis.com/youtube/v3/search'
