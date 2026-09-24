@@ -1,12 +1,11 @@
 name: Generate lockfile artifact
 
 on:
-  workflow_dispatch:
   push:
     branches: ["rebuild/professional-foundation"]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   lockfile:
@@ -14,14 +13,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: rebuild/professional-foundation
+          fetch-depth: 0
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 24
       - name: Regenerate lockfile
         run: npm install --package-lock-only --ignore-scripts
-      - name: Upload lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: krovi-package-lock
-          path: package-lock.json
+      - name: Commit lockfile when changed
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json is already synchronized."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "chore: synchronize npm lockfile [skip ci]"
+          git push origin HEAD:rebuild/professional-foundation
