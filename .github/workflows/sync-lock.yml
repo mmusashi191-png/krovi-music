@@ -1,0 +1,27 @@
+name: Generate lockfile artifact
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["rebuild/professional-foundation"]
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Regenerate lockfile
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Upload lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: krovi-package-lock
+          path: package-lock.json
