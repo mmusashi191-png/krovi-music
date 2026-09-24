@@ -184,6 +184,10 @@ function App() {
     return subscribeToRoom(connectRoom.roomCode, (message) => {
       if (message.type === 'error') {
         setConnectError(message.message || connectConfigMessage)
+        if (message.code === 'ROOM_NOT_FOUND') {
+          setConnectRoom(null)
+          setChatMessages([])
+        }
         return
       }
 
