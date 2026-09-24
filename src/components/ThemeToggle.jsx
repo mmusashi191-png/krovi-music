@@ -1,4 +1,4 @@
-import { Leaf, Rose } from 'lucide-react'
+import { Flower2, Leaf } from 'lucide-react'
 
 export default function ThemeToggle({ theme, onToggle }) {
   const verdant = theme === 'verdant'
@@ -11,7 +11,7 @@ export default function ThemeToggle({ theme, onToggle }) {
       aria-label={verdant ? 'Switch to Rosé theme' : 'Switch to Verdant theme'}
       title={verdant ? 'Rosé' : 'Verdant'}
     >
-      {verdant ? <Rose size={17} /> : <Leaf size={17} />}
+      {verdant ? <Flower2 size={17} /> : <Leaf size={17} />}
     </button>
   )
 }
