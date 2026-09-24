@@ -2,8 +2,9 @@ services:
   - type: web
     name: krovi-music-api
     runtime: node
-    buildCommand: npm install
+    buildCommand: npm ci
     startCommand: npm start
+    healthCheckPath: /health
     envVars:
       - key: YOUTUBE_API_KEY
         sync: false
