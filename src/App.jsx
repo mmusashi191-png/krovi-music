@@ -513,6 +513,14 @@ function App() {
     setConnectOpen(true)
   }, [])
 
+  const closeConnect = useCallback(() => {
+    setConnectOpen(false)
+  }, [])
+
+  const closePlaylistPicker = useCallback(() => {
+    setPlaylistPickerTrack(null)
+  }, [])
+
   const handleCreateRoom = useCallback(async () => {
     setConnectError('')
     try {
@@ -530,6 +538,7 @@ function App() {
     try {
       const room = await joinRoom(roomCode)
       setConnectRoom(room)
+      setChatMessages([])
       setConnectOpen(true)
     } catch (error) {
       setConnectError(error.message || connectConfigMessage)
@@ -670,7 +679,7 @@ function App() {
           playlists={playlists}
           onAdd={addToPlaylist}
           onCreate={createPlaylist}
-          onClose={() => setPlaylistPickerTrack(null)}
+          onClose={closePlaylistPicker}
         />
       )}
 
@@ -684,7 +693,7 @@ function App() {
           onJoin={handleJoinRoom}
           onLeave={handleLeaveRoom}
           onSendChat={handleSendChat}
-          onClose={() => setConnectOpen(false)}
+          onClose={closeConnect}
         />
       )}
     </div>
