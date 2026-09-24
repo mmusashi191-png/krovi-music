@@ -169,6 +169,12 @@ function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
+    const themeColor = document.querySelector('meta[name="theme-color"]')
+
+    if (themeColor) {
+      themeColor.setAttribute('content', theme === 'verdant' ? '#1d281f' : '#eee7e9')
+    }
+
     writeStorage(STORAGE.theme, theme)
   }, [theme])
 
