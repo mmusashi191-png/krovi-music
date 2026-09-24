@@ -23,7 +23,9 @@ function getClientId() {
 
 function getWebSocketUrl() {
   const configured = String(import.meta.env.VITE_CONNECT_WS_URL || '').trim().replace(/\/$/, '')
-  if (configured) return configured
+  const isStaleProductionLocalUrl = import.meta.env.PROD
+    && /^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(configured)
+  if (configured && !isStaleProductionLocalUrl) return configured
 
   const host = window.location.hostname
   if (host === 'localhost' || host === '127.0.0.1') {
