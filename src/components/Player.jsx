@@ -7,6 +7,7 @@ import {
   Maximize2,
   Pause,
   Play,
+  Plus,
   Repeat1,
   Repeat2,
   Shuffle,
@@ -22,24 +23,26 @@ let youtubeApiPromise
 
 function loadYouTubeApi() {
   if (window.YT?.Player) return Promise.resolve(window.YT)
+
   if (!youtubeApiPromise) {
     youtubeApiPromise = new Promise((resolve) => {
-      const existingScript = document.querySelector('script[src="https://www.youtube.com/iframe_api"]')
       const previousReady = window.onYouTubeIframeAPIReady
+      const script = document.querySelector('script[src="https://www.youtube.com/iframe_api"]')
 
       window.onYouTubeIframeAPIReady = () => {
         previousReady?.()
         resolve(window.YT)
       }
 
-      if (!existingScript) {
-        const script = document.createElement('script')
-        script.src = 'https://www.youtube.com/iframe_api'
-        script.async = true
-        document.head.appendChild(script)
+      if (!script) {
+        const nextScript = document.createElement('script')
+        nextScript.src = 'https://www.youtube.com/iframe_api'
+        nextScript.async = true
+        document.head.appendChild(nextScript)
       }
     })
   }
+
   return youtubeApiPromise
 }
 
@@ -61,39 +64,48 @@ function Artwork({ track, large = false }) {
 function QueueDrawer({ queue, currentIndex, onSelect, onRemove, onClear, onClose }) {
   return (
     <div className="queue-overlay" onClick={onClose}>
-      <section className="queue-drawer" role="dialog" aria-modal="true" aria-label="Playback queue" onClick={(event) => event.stopPropagation()}>
+      <section
+        className="queue-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Playback queue"
+        onClick={(event) => event.stopPropagation()}
+      >
         <header className="sheet-header">
           <div>
             <p className="eyebrow">UP NEXT</p>
             <h2>Queue</h2>
           </div>
-          <button type="button" className="icon-button" aria-label="Close queue" onClick={onClose}><X size={19} /></button>
+          <button type="button" className="icon-button" aria-label="Close queue" onClick={onClose}>
+            <X size={19} />
+          </button>
         </header>
 
         {queue.length ? (
           <div className="queue-list">
-            {queue.map((track, index) => (
-              <div className={'queue-row ' + (index === currentIndex ? 'current' : '')} key={track.videoId + '-' + index}>
+            {queue.map((item, index) => (
+              <div className={'queue-row ' + (index === currentIndex ? 'current' : '')} key={item.videoId + '-' + index}>
                 <button
                   type="button"
                   className="queue-main"
                   onClick={() => {
-                    onSelect(track, true, queue)
+                    onSelect(item, true, queue)
                     onClose()
                   }}
                 >
-                  <Artwork track={track} />
+                  <Artwork track={item} />
                   <span>
-                    <strong>{track.title}</strong>
-                    <small>{index === currentIndex ? 'Playing now' : track.artist}</small>
+                    <strong>{item.title}</strong>
+                    <small>{index === currentIndex ? 'Playing now' : item.artist}</small>
                   </span>
                 </button>
+
                 {index !== currentIndex && (
                   <button
                     type="button"
                     className="icon-button subtle"
-                    aria-label={'Remove ' + track.title}
-                    onClick={() => onRemove(track.videoId)}
+                    aria-label={'Remove ' + item.title}
+                    onClick={() => onRemove(item.videoId)}
                   >
                     <Trash2 size={16} />
                   </button>
@@ -108,22 +120,12 @@ function QueueDrawer({ queue, currentIndex, onSelect, onRemove, onClear, onClose
           </div>
         )}
 
-        <button type="button" className="sheet-action danger" onClick={onClear}>
-          <Trash2 size={15} /> Clear queue
-        </button>
+        {queue.length > 1 && (
+          <button type="button" className="sheet-action danger" onClick={onClear}>
+            <Trash2 size={15} /> Clear queue
+          </button>
+        )}
       </section>
-    </div>
-  )
-}
-
-function PlayerControls({ isPlaying, isLoading, onToggle, onPrevious, onNext }) {
-  return (
-    <div className="player-controls">
-      <button type="button" className="control-button secondary" aria-label="Previous track" onClick={onPrevious}><SkipBack size={18} fill="currentColor" /></button>
-      <button type="button" className="control-button primary" aria-label={isPlaying ? 'Pause' : 'Play'} onClick={onToggle}>
-        {isLoading ? <LoaderCircle size={21} className="spin" /> : isPlaying ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" />}
-      </button>
-      <button type="button" className="control-button secondary" aria-label="Next track" onClick={onNext}><SkipForward size={18} fill="currentColor" /></button>
     </div>
   )
 }
@@ -163,8 +165,10 @@ export default function Player({
   const isPlaying = playback.isPlaying
   const isLoading = playback.isLoading
   const duration = playback.duration
-  const currentTime = seekValue ?? playback.currentTime
-  const progress = duration > 0 ? Math.min(100, Math.max(0, currentTime / duration * 100)) : 0
+  const displayedTime = seekValue ?? playback.currentTime
+  const progress = duration > 0
+    ? Math.min(100, Math.max(0, displayedTime / duration * 100))
+    : 0
   const liked = Boolean(track && likedTracks.some((item) => item.videoId === track.videoId))
 
   useEffect(() => { currentTrackRef.current = track }, [track])
@@ -183,6 +187,7 @@ export default function Player({
   const readProgress = useCallback(() => {
     const player = playerRef.current
     if (!player?.getCurrentTime) return
+
     onPlaybackChange({
       currentTime: Number(player.getCurrentTime()) || 0,
       duration: Number(player.getDuration?.()) || 0,
@@ -195,15 +200,16 @@ export default function Player({
     progressTimerRef.current = window.setInterval(readProgress, 400)
   }, [readProgress, stopProgress])
 
-  const playNext = useCallback(() => {
+  const nextTrack = useCallback(() => {
     const tracks = queueRef.current
     const index = queueIndexRef.current
     if (!tracks.length) return
 
     let nextIndex = -1
+
     if (shuffleRef.current && tracks.length > 1) {
-      const candidates = tracks.map((_, candidate) => candidate).filter((candidate) => candidate !== index)
-      nextIndex = candidates[Math.floor(Math.random() * candidates.length)]
+      const choices = tracks.map((_, candidate) => candidate).filter((candidate) => candidate !== index)
+      nextIndex = choices[Math.floor(Math.random() * choices.length)]
     } else if (index < tracks.length - 1) {
       nextIndex = index + 1
     } else if (repeatRef.current === 'all') {
@@ -213,46 +219,50 @@ export default function Player({
     if (nextIndex >= 0) onSelectTrack(tracks[nextIndex], true, tracks)
   }, [onSelectTrack])
 
-  const playPrevious = useCallback(() => {
+  const previousTrack = useCallback(() => {
     const player = playerRef.current
     const position = Number(player?.getCurrentTime?.()) || 0
 
     if (position > 3) {
-      player.seekTo(0, true)
-      onPlaybackChange({ currentTime: 0 }, { sync: true, command: 'seek', seekPosition: 0 })
+      player?.seekTo?.(0, true)
+      onPlaybackChange({ currentTime: 0 }, {
+        sync: true,
+        command: 'seek',
+        seekPosition: 0,
+      })
       return
     }
 
     const tracks = queueRef.current
-    let index = queueIndexRef.current - 1
-    if (index < 0) {
+    if (!tracks.length) return
+
+    let previousIndex = queueIndexRef.current - 1
+    if (previousIndex < 0) {
       if (repeatRef.current !== 'all') return
-      index = tracks.length - 1
+      previousIndex = tracks.length - 1
     }
-    if (tracks[index]) onSelectTrack(tracks[index], true, tracks)
+
+    if (tracks[previousIndex]) onSelectTrack(tracks[previousIndex], true, tracks)
   }, [onPlaybackChange, onSelectTrack])
 
   const handleEnded = useCallback(() => {
     if (repeatRef.current === 'one') {
       const player = playerRef.current
-      if (player) {
-        player.seekTo(0, true)
-        player.playVideo()
-      }
+      player?.seekTo?.(0, true)
+      player?.playVideo?.()
       return
     }
-    playNext()
-  }, [playNext])
+
+    nextTrack()
+  }, [nextTrack])
 
   useEffect(() => {
     const videoId = track?.videoId || ''
 
     if (!videoId) {
       currentVideoIdRef.current = ''
-      if (playerRef.current) {
-        playerRef.current.destroy()
-        playerRef.current = null
-      }
+      playerRef.current?.destroy?.()
+      playerRef.current = null
       stopProgress()
       return undefined
     }
@@ -287,30 +297,48 @@ export default function Player({
             playerRef.current = event.target
             currentVideoIdRef.current = videoId
             event.target.setVolume(volumeRef.current)
-            setMuted(Boolean(event.target.isMuted?.()))
+
             if (playingRef.current) event.target.playVideo()
           },
           onStateChange: (event) => {
             if (currentVideoIdRef.current !== videoId) return
 
             if (event.data === youtube.PlayerState.PLAYING) {
+              setMuted(Boolean(event.target.isMuted?.()))
               onPlaybackChange({ isPlaying: true, isLoading: false }, { sync: false })
               onTrackStarted?.(currentTrackRef.current)
               startProgress()
-            } else if (event.data === youtube.PlayerState.BUFFERING) {
+              return
+            }
+
+            if (event.data === youtube.PlayerState.BUFFERING) {
               onPlaybackChange({ isLoading: true }, { sync: false })
-            } else if (event.data === youtube.PlayerState.PAUSED) {
+              return
+            }
+
+            if (event.data === youtube.PlayerState.PAUSED) {
               stopProgress()
               readProgress()
               onPlaybackChange({ isPlaying: false, isLoading: false }, { sync: false })
-            } else if (event.data === youtube.PlayerState.ENDED) {
+              return
+            }
+
+            if (event.data === youtube.PlayerState.ENDED) {
               stopProgress()
               readProgress()
               onPlaybackChange({ isPlaying: false, isLoading: false }, { sync: false })
               handleEnded()
-            } else if (event.data === youtube.PlayerState.CUED) {
+              return
+            }
+
+            if (event.data === youtube.PlayerState.CUED) {
               stopProgress()
-              onPlaybackChange({ isPlaying: false, isLoading: false, currentTime: 0, duration: 0 }, { sync: false })
+              onPlaybackChange({
+                isPlaying: false,
+                isLoading: false,
+                currentTime: 0,
+                duration: 0,
+              }, { sync: false })
             }
           },
           onError: () => {
@@ -330,13 +358,22 @@ export default function Player({
     return () => {
       cancelled = true
     }
-  }, [handleEnded, onPlaybackChange, onTrackStarted, readProgress, startProgress, stopProgress, track?.videoId])
+  }, [
+    handleEnded,
+    onPlaybackChange,
+    onTrackStarted,
+    readProgress,
+    startProgress,
+    stopProgress,
+    track?.videoId,
+  ])
 
   useEffect(() => {
     const player = playerRef.current
     if (!player || !track?.videoId || !window.YT?.PlayerState) return
 
     const state = player.getPlayerState?.()
+
     if (isPlaying) {
       if (state !== window.YT.PlayerState.PLAYING && state !== window.YT.PlayerState.BUFFERING) {
         player.playVideo()
@@ -348,31 +385,33 @@ export default function Player({
 
   useEffect(() => {
     const request = playback.seekRequest
-    const player = playerRef.current
     if (!request?.remote || request.videoId !== track?.videoId || !Number.isFinite(request.time)) return
-
-    player?.seekTo?.(Math.max(0, request.time), true)
+    playerRef.current?.seekTo?.(Math.max(0, request.time), true)
   }, [playback.seekRequest, track?.videoId])
 
   useEffect(() => () => {
     stopProgress()
-    playerRef.current?.destroy()
+    playerRef.current?.destroy?.()
     playerRef.current = null
   }, [stopProgress])
 
   useEffect(() => {
     if (!expanded && !queueOpen) return undefined
-    const handler = (event) => {
-      if (event.key !== 'Escape') return
-      setQueueOpen(false)
-      setExpanded(false)
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setQueueOpen(false)
+        setExpanded(false)
+      }
     }
-    window.addEventListener('keydown', handler)
+
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKeyDown)
+
     return () => {
       document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', handler)
+      window.removeEventListener('keydown', onKeyDown)
     }
   }, [expanded, queueOpen])
 
@@ -381,8 +420,10 @@ export default function Player({
   const togglePlayback = () => {
     const player = playerRef.current
     if (!player) return
-    const current = Number(player.getCurrentTime?.()) || 0
+
     const nextPlaying = !playingRef.current
+    const current = Number(player.getCurrentTime?.()) || playback.currentTime
+
     onPlaybackChange({
       isPlaying: nextPlaying,
       isLoading: nextPlaying,
@@ -393,8 +434,10 @@ export default function Player({
     })
   }
 
-  const changeSeek = (event) => {
+  const handleSeek = (event) => {
     const next = Number(event.target.value)
+    if (!Number.isFinite(next)) return
+
     setSeekValue(next)
     playerRef.current?.seekTo?.(next, true)
     onPlaybackChange({ currentTime: next }, { sync: false })
@@ -411,88 +454,72 @@ export default function Player({
     })
   }
 
-  const changeVolume = (event) => {
-    const next = Number(event.target.value)
-    setVolume(next)
-    setMuted(next === 0)
-    playerRef.current?.setVolume?.(next)
-    if (next > 0) volumeRef.current = next
-  }
-
   const toggleMute = () => {
     const player = playerRef.current
     if (!player) return
+
     if (muted) {
       const next = volumeRef.current || 80
-      setVolume(next)
       setMuted(false)
+      setVolume(next)
       player.unMute()
       player.setVolume(next)
     } else {
-      if (volume > 0) volumeRef.current = volume
+      volumeRef.current = volume || 80
       setMuted(true)
       player.mute()
     }
   }
 
-  const toggleRepeat = () => {
+  const changeVolume = (event) => {
+    const next = Number(event.target.value)
+    setVolume(next)
+    volumeRef.current = next
+    setMuted(next === 0)
+    playerRef.current?.setVolume?.(next)
+  }
+
+  const cycleRepeat = () => {
     setRepeat((current) => current === 'off' ? 'all' : current === 'all' ? 'one' : 'off')
   }
 
   return (
     <>
-      <aside className={'player-dock ' + (expanded ? 'expanded-hidden' : '')}>
-        <div className="player-video-mini">
-          <div className="youtube-mount" ref={mountRef} />
-          <div className="player-mini-sheen" aria-hidden="true" />
-        </div>
+      {expanded && <div className="player-backdrop" aria-hidden="true" />}
 
-        <div className="player-dock-body">
-          <button type="button" className="player-track-button" onClick={() => setExpanded(true)} aria-label="Open full player">
-            <Artwork track={track} />
-            <span className="player-track-copy">
-              <strong>{track.title}</strong>
-              <small>{track.artist}</small>
-            </span>
-          </button>
-
-          <div className="player-dock-actions">
-            <button type="button" className={liked ? 'icon-button active' : 'icon-button'} aria-label={liked ? 'Unlike' : 'Like'} onClick={() => onToggleLike(track)}>
-              <Heart size={18} fill={liked ? 'currentColor' : 'none'} />
+      <aside className={'player-dock ' + (expanded ? 'is-expanded' : '')}>
+        {expanded ? (
+          <header className="player-full-header">
+            <button type="button" className="icon-button" aria-label="Close player" onClick={() => setExpanded(false)}>
+              <ChevronDown size={22} />
             </button>
+            <p className="eyebrow">NOW PLAYING</p>
             <button type="button" className="icon-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}>
-              <ListMusic size={18} />
+              <ListMusic size={19} />
             </button>
-            <button type="button" className="mini-play" aria-label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlayback}>
-              {isLoading ? <LoaderCircle size={17} className="spin" /> : isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
-            </button>
-          </div>
+          </header>
+        ) : null}
+
+        <div className="player-video">
+          <div className="youtube-mount" ref={mountRef} />
+          <div className="player-video-grain" aria-hidden="true" />
+          {!expanded && <button type="button" className="player-video-open" aria-label="Expand player" onClick={() => setExpanded(true)} />}
         </div>
 
-        <div className="mini-progress" aria-hidden="true"><span style={{ width: progress + '%' }} /></div>
-      </aside>
-
-      {expanded && (
-        <div className="player-fullscreen">
-          <div className="player-fullscreen-inner">
-            <header className="player-full-header">
-              <button type="button" className="icon-button" aria-label="Close player" onClick={() => setExpanded(false)}><ChevronDown size={22} /></button>
-              <span className="eyebrow">NOW PLAYING</span>
-              <button type="button" className="icon-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}><ListMusic size={19} /></button>
-            </header>
-
-            <div className="player-full-video">
-              <div className="youtube-mount" ref={expanded ? undefined : null} />
-              <div className="player-full-overlay" aria-hidden="true" />
-            </div>
-
+        {expanded ? (
+          <div className="player-expanded-content">
             <section className="player-full-info">
-              <div className="player-full-art"><Artwork track={track} large /></div>
+              <Artwork track={track} large />
               <div className="player-full-copy">
                 <h1>{track.title}</h1>
                 <p>{track.artist}</p>
               </div>
-              <button type="button" className={liked ? 'icon-button active' : 'icon-button'} aria-label={liked ? 'Unlike' : 'Like'} onClick={() => onToggleLike(track)}>
+              <button
+                type="button"
+                className={'icon-button ' + (liked ? 'active' : '')}
+                aria-label={liked ? 'Unlike' : 'Like'}
+                onClick={() => onToggleLike(track)}
+              >
                 <Heart size={21} fill={liked ? 'currentColor' : 'none'} />
               </button>
             </section>
@@ -503,27 +530,49 @@ export default function Player({
                 min="0"
                 max={duration || 0}
                 step="0.1"
-                value={duration ? currentTime : 0}
-                onChange={changeSeek}
+                value={duration ? displayedTime : 0}
+                onChange={handleSeek}
                 onPointerUp={commitSeek}
                 onKeyUp={(event) => {
                   if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) commitSeek()
                 }}
                 aria-label="Seek through track"
               />
-              <div className="time-row"><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div>
+              <div className="time-row">
+                <span>{formatTime(displayedTime)}</span>
+                <span>{formatTime(duration)}</span>
+              </div>
             </div>
 
-            <PlayerControls isPlaying={isPlaying} isLoading={isLoading} onToggle={togglePlayback} onPrevious={playPrevious} onNext={playNext} />
+            <div className="player-controls">
+              <button type="button" className="control-button secondary" aria-label="Previous track" onClick={previousTrack}>
+                <SkipBack size={18} fill="currentColor" />
+              </button>
+              <button type="button" className="control-button primary" aria-label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlayback}>
+                {isLoading
+                  ? <LoaderCircle size={22} className="spin" />
+                  : isPlaying
+                    ? <Pause size={22} fill="currentColor" />
+                    : <Play size={22} fill="currentColor" />}
+              </button>
+              <button type="button" className="control-button secondary" aria-label="Next track" onClick={nextTrack}>
+                <SkipForward size={18} fill="currentColor" />
+              </button>
+            </div>
 
             <div className="full-secondary-controls">
-              <button type="button" className={'control-pill ' + (shuffle ? 'active' : '')} onClick={() => setShuffle((current) => !current)}><Shuffle size={16} /> Shuffle</button>
-              <button type="button" className={'control-pill ' + (repeat !== 'off' ? 'active' : '')} onClick={toggleRepeat}>
-                {repeat === 'one' ? <Repeat1 size={16} /> : <Repeat2 size={16} />}
-                Repeat
+              <button type="button" className={'control-pill ' + (shuffle ? 'active' : '')} onClick={() => setShuffle((current) => !current)}>
+                <Shuffle size={16} /> Shuffle
               </button>
-              <button type="button" className="control-pill" onClick={() => setQueueOpen(true)}><ListMusic size={16} /> Queue</button>
-              <button type="button" className="control-pill" onClick={() => onRequestPlaylist(track)}><PlusIcon /> Playlist</button>
+              <button type="button" className={'control-pill ' + (repeat !== 'off' ? 'active' : '')} onClick={cycleRepeat}>
+                {repeat === 'one' ? <Repeat1 size={16} /> : <Repeat2 size={16} />} Repeat
+              </button>
+              <button type="button" className="control-pill" onClick={() => setQueueOpen(true)}>
+                <ListMusic size={16} /> Queue
+              </button>
+              <button type="button" className="control-pill" onClick={() => onRequestPlaylist(track)}>
+                <Plus size={16} /> Playlist
+              </button>
             </div>
 
             <div className="volume-row">
@@ -531,11 +580,39 @@ export default function Player({
                 {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
               </button>
               <input type="range" min="0" max="100" value={muted ? 0 : volume} onChange={changeVolume} aria-label="Volume" />
-              <button type="button" className="icon-button subtle" aria-label="Close expanded player" onClick={() => setExpanded(false)}><Maximize2 size={17} /></button>
+              <button type="button" className="icon-button subtle" aria-label="Close expanded player" onClick={() => setExpanded(false)}>
+                <Maximize2 size={17} />
+              </button>
             </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <>
+            <div className="player-dock-body">
+              <button type="button" className="player-track-button" onClick={() => setExpanded(true)} aria-label="Open full player">
+                <Artwork track={track} />
+                <span className="player-track-copy">
+                  <strong>{track.title}</strong>
+                  <small>{track.artist}</small>
+                </span>
+              </button>
+
+              <div className="player-dock-actions">
+                <button type="button" className={'icon-button ' + (liked ? 'active' : '')} aria-label={liked ? 'Unlike' : 'Like'} onClick={() => onToggleLike(track)}>
+                  <Heart size={18} fill={liked ? 'currentColor' : 'none'} />
+                </button>
+                <button type="button" className="icon-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}>
+                  <ListMusic size={18} />
+                </button>
+                <button type="button" className="mini-play" aria-label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlayback}>
+                  {isLoading ? <LoaderCircle size={17} className="spin" /> : isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="mini-progress" aria-hidden="true"><span style={{ width: progress + '%' }} /></div>
+          </>
+        )}
+      </aside>
 
       {queueOpen && (
         <QueueDrawer
@@ -549,8 +626,4 @@ export default function Player({
       )}
     </>
   )
-}
-
-function PlusIcon() {
-  return <span className="plus-mark" aria-hidden="true">+</span>
 }
