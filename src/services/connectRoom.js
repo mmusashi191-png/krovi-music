@@ -27,8 +27,13 @@ function getWebSocketUrl() {
     && /^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(configured)
   if (configured && !isStaleProductionLocalUrl) return configured
 
+  const isNativeApp = Boolean(window.Capacitor?.isNativePlatform?.())
   const host = window.location.hostname
-  if (host === 'localhost' || host === '127.0.0.1') {
+
+  // Capacitor's Android WebView uses a localhost-like origin, but the
+  // Connect server lives on Render. Only browser development should use
+  // the local :8787 socket.
+  if (!isNativeApp && (host === 'localhost' || host === '127.0.0.1')) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return protocol + '://' + host + ':8787/ws'
   }
@@ -77,14 +82,18 @@ function attachSocketEvents(nextSocket) {
     }
   })
 
-  nextSocket.addEventListener('close', () => {
+  nextSocket.addEventListener('close', (event) => {
     if (socket === nextSocket) socket = null
     socketPromise = null
+
+    const detail = event.code && event.code !== 1000
+      ? 'Connect closed the socket (code ' + event.code + ').'
+      : connectConfigMessage
 
     notify({
       type: 'connection-state',
       state: 'disconnected',
-      message: connectConfigMessage,
+      message: detail,
     })
 
     scheduleReconnect()
