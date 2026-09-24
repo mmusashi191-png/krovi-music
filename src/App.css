@@ -1172,6 +1172,10 @@ button:disabled {
   color: var(--accent-deep);
 }
 
+.bottom-nav button.active svg {
+  animation: activeNavPop 420ms var(--ease-spring) both;
+}
+
 .bottom-nav button.active::before {
   transform: scaleX(1);
 }
@@ -1276,6 +1280,10 @@ button:disabled {
 .pip-player:not(.is-hidden) {
   visibility: visible;
   opacity: 1;
+  animation-name: pipEnter, pipSummon;
+  animation-duration: 480ms, 380ms;
+  animation-timing-function: var(--ease-spring), var(--ease-spring);
+  animation-fill-mode: both, both;
   transition:
     opacity 280ms ease,
     transform 380ms var(--ease-spring);
@@ -1434,6 +1442,10 @@ button:disabled {
 
 .mini-play:hover {
   transform: scale(1.06);
+}
+
+.mini-play:active {
+  animation: controlBounce 320ms var(--ease-spring) both;
 }
 
 .mini-progress {
@@ -2615,8 +2627,27 @@ input[type="range"] {
 
 @keyframes themeCircle {
   0% { clip-path: circle(0% at 94% 5%); opacity: 1; }
-  72% { clip-path: circle(155% at 94% 5%); opacity: 1; }
+  68% { clip-path: circle(155% at 94% 5%); opacity: 1; }
+  86% { clip-path: circle(155% at 94% 5%); opacity: .96; }
   100% { clip-path: circle(155% at 94% 5%); opacity: 0; }
+}
+
+@keyframes activeNavPop {
+  0% { transform: translateY(2px) scale(.86); }
+  60% { transform: translateY(-3px) scale(1.08); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes controlBounce {
+  0% { transform: scale(1); }
+  42% { transform: scale(.86) rotate(-4deg); }
+  72% { transform: scale(1.07) rotate(2deg); }
+  100% { transform: scale(1); }
+}
+
+@keyframes pipSummon {
+  from { opacity: 0; transform: scale(.78) translateY(14px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 @keyframes pageEnter {
