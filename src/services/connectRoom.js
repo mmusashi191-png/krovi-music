@@ -31,6 +31,14 @@ function getWebSocketUrl() {
 }
 
 function notify(message) {
+  if (
+    message.type === 'error' &&
+    ['ROOM_NOT_FOUND', 'ROOM_FULL', 'INVALID_ROOM_CODE'].includes(message.code)
+  ) {
+    desiredRoomCode = ''
+    if (message.roomCode) snapshots.delete(message.roomCode)
+  }
+
   listeners.forEach((listener) => listener(message))
 }
 
@@ -170,6 +178,7 @@ function request(message, expectedType) {
 }
 
 export async function createRoom(playback = {}) {
+  desiredRoomCode = ''
   const response = await request({ type: 'create-room', playback }, 'room-state')
   desiredRoomCode = response.roomCode
   return {
@@ -181,6 +190,7 @@ export async function createRoom(playback = {}) {
 }
 
 export async function joinRoom(roomCode) {
+  desiredRoomCode = ''
   const normalizedCode = String(roomCode || '').trim().toUpperCase()
   const response = await request({ type: 'join-room', roomCode: normalizedCode }, 'room-state')
   desiredRoomCode = response.roomCode
@@ -266,7 +276,9 @@ export function sendChatMessage(roomCode, text) {
 }
 
 export function leaveRoom() {
+  const previousRoomCode = desiredRoomCode
   desiredRoomCode = ''
+  if (previousRoomCode) snapshots.delete(previousRoomCode)
   if (socket?.readyState === WebSocket.OPEN) {
     try {
       socket.send(JSON.stringify({ type: 'leave-room', clientId: getClientId() }))
