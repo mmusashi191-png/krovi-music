@@ -8,8 +8,10 @@ export default defineConfig([
   globalIgnores([
     'dist/**',
     'android/**',
+    'ios/**',
     '.sync-backup-*/**',
     '**/*.before-*',
+    'coverage/**',
   ]),
   {
     files: ['src/**/*.{js,jsx}', 'server.cjs'],
@@ -19,11 +21,9 @@ export default defineConfig([
       reactRefresh.configs.vite,
     ],
     languageOptions: {
-      globals: {
-        ...globals.browser,
-        ...globals.node,
-      },
+      globals: { ...globals.browser, ...globals.node },
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+    rules: { 'no-console': 'off' },
   },
 ])
