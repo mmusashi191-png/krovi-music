@@ -5,6 +5,7 @@ import {
   ListMusic,
   LoaderCircle,
   Maximize2,
+  Move,
   Pause,
   Play,
   Plus,
@@ -18,6 +19,11 @@ import {
   VolumeX,
   X,
 } from 'lucide-react'
+import {
+  requestNativeMediaPermission,
+  startNativeMedia,
+  stopNativeMedia,
+} from '../services/nativeMedia.js'
 
 let youtubeApiPromise
 
@@ -164,6 +170,7 @@ export default function Player({
   const dragRef = useRef(null)
   const dragMovedRef = useRef(false)
   const dragCleanupRef = useRef(null)
+  const nativeNotificationRequestedRef = useRef(false)
 
   const track = playback.currentTrack
   const isPlaying = playback.isPlaying
@@ -367,7 +374,7 @@ export default function Player({
         videoId,
         playerVars: {
           playsinline: 1,
-          controls: 1,
+          controls: 0,
           rel: 0,
           modestbranding: 1,
           origin: window.location.origin,
@@ -566,158 +573,234 @@ export default function Player({
     setRepeat((current) => current === 'off' ? 'all' : current === 'all' ? 'one' : 'off')
   }
 
+  useEffect(() => {
+    if (!track) {
+      stopNativeMedia()
+      return
+    }
+
+    if (isPlaying) {
+      if (!nativeNotificationRequestedRef.current) {
+        nativeNotificationRequestedRef.current = true
+        requestNativeMediaPermission()
+      }
+      startNativeMedia(track)
+    } else {
+      stopNativeMedia()
+    }
+  }, [isPlaying, track])
+
+  useEffect(() => {
+    const handleNativeCommand = (event) => {
+      const command = event.detail?.command
+
+      if (command === 'play' && !playingRef.current) {
+        togglePlayback()
+      } else if (command === 'pause' && playingRef.current) {
+        togglePlayback()
+      } else if (command === 'previous') {
+        previousTrack()
+      } else if (command === 'next') {
+        nextTrack()
+      }
+    }
+
+    window.addEventListener('krovi-native-media-command', handleNativeCommand)
+    return () => window.removeEventListener('krovi-native-media-command', handleNativeCommand)
+  }, [nextTrack, previousTrack, togglePlayback])
+
   return (
     <>
       {expanded && <div className="player-backdrop" aria-hidden="true" />}
 
-      <aside
-        className={'player-dock ' + (expanded ? 'is-expanded' : '') + (isPlaying ? ' is-playing' : '') + (pipPosition && !expanded ? ' is-floating' : '')}
-        style={!expanded && pipPosition ? {
-          left: pipPosition.x + 'px',
-          top: pipPosition.y + 'px',
-          right: 'auto',
-          bottom: 'auto',
-          transform: 'none',
-        } : undefined}
-      >
-        {expanded ? (
-          <header className="player-full-header">
-            <button type="button" className="icon-button" aria-label="Close player" onClick={() => setExpanded(false)}>
-              <ChevronDown size={22} />
-            </button>
-            <p className="eyebrow">NOW PLAYING</p>
-            <button type="button" className="icon-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}>
-              <ListMusic size={19} />
-            </button>
-          </header>
-        ) : null}
+      {pipVisible && (
+        <div
+          className={'pip-player ' + (expanded ? 'is-expanded' : '')}
+          style={!expanded && pipPosition ? {
+            left: pipPosition.x + 'px',
+            top: pipPosition.y + 'px',
+            right: 'auto',
+            bottom: 'auto',
+          } : undefined}
+        >
+          {expanded && (
+            <header className="player-full-header">
+              <button type="button" className="icon-button" aria-label="Close full video" onClick={() => setExpanded(false)}>
+                <ChevronDown size={22} />
+              </button>
+              <p className="eyebrow">NOW PLAYING</p>
+              <button type="button" className="icon-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}>
+                <ListMusic size={19} />
+              </button>
+            </header>
+          )}
 
-        <div className="player-video">
-          <div className="youtube-mount" ref={mountRef} />
-          <div className="player-video-grain" aria-hidden="true" />
-          {!expanded && (
+          <div className="player-video">
+            <div className="youtube-mount" ref={mountRef} />
+            <div className="player-video-grain" aria-hidden="true" />
+
+            {!expanded && (
+              <>
+                <button
+                  type="button"
+                  className="pip-drag-handle"
+                  aria-label="Hold and drag video"
+                  onPointerDown={startPipDrag}
+                >
+                  <Move size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="pip-close-button"
+                  aria-label="Hide video"
+                  onClick={() => onPlaybackChange({ pipVisible: false }, { sync: false })}
+                >
+                  <X size={16} />
+                </button>
+              </>
+            )}
+
             <button
               type="button"
-              className="player-video-open"
-              aria-label="Expand or move player"
-              onPointerDown={startPipDrag}
-              onClick={() => {
-                if (dragMovedRef.current) {
-                  dragMovedRef.current = false
-                  return
-                }
-                setExpanded(true)
-              }}
-            />
+              className="pip-full-button"
+              aria-label="Watch video full screen"
+              onClick={() => setExpanded(true)}
+            >
+              <Maximize2 size={16} />
+            </button>
+          </div>
+
+          {expanded && (
+            <div className="player-expanded-content">
+              <section className="player-full-info">
+                <Artwork track={track} large />
+                <div className="player-full-copy">
+                  <h1>{track.title}</h1>
+                  <p>{track.artist}</p>
+                </div>
+                <button
+                  type="button"
+                  className={'icon-button ' + (liked ? 'active' : '')}
+                  aria-label={liked ? 'Unlike' : 'Like'}
+                  onClick={() => onToggleLike(track)}
+                >
+                  <Heart size={21} fill={liked ? 'currentColor' : 'none'} />
+                </button>
+              </section>
+
+              <div className="progress-area">
+                <input
+                  className="player-range"
+                  type="range"
+                  min="0"
+                  max={duration || 0}
+                  step="0.1"
+                  value={duration ? displayedTime : 0}
+                  style={{ '--range-progress': progress + '%' }}
+                  onChange={handleSeek}
+                  onPointerUp={commitSeek}
+                  onKeyUp={(event) => {
+                    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) commitSeek()
+                  }}
+                  aria-label="Seek through track"
+                />
+                <div className="time-row">
+                  <span>{formatTime(displayedTime)}</span>
+                  <span>{formatTime(duration)}</span>
+                </div>
+              </div>
+
+              <div className="player-controls">
+                <button type="button" className="control-button secondary" aria-label="Previous track" onClick={previousTrack}>
+                  <SkipBack size={18} fill="currentColor" />
+                </button>
+                <button type="button" className="control-button primary" aria-label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlayback}>
+                  {isLoading
+                    ? <LoaderCircle size={22} className="spin" />
+                    : isPlaying
+                      ? <Pause size={22} fill="currentColor" />
+                      : <Play size={22} fill="currentColor" />}
+                </button>
+                <button type="button" className="control-button secondary" aria-label="Next track" onClick={nextTrack}>
+                  <SkipForward size={18} fill="currentColor" />
+                </button>
+              </div>
+
+              <div className="full-secondary-controls">
+                <button type="button" className={'control-pill ' + (shuffle ? 'active' : '')} onClick={() => setShuffle((current) => !current)}>
+                  <Shuffle size={16} /> Shuffle
+                </button>
+                <button type="button" className={'control-pill ' + (repeat !== 'off' ? 'active' : '')} onClick={cycleRepeat}>
+                  {repeat === 'one' ? <Repeat1 size={16} /> : <Repeat2 size={16} />} Repeat
+                </button>
+                <button type="button" className="control-pill" onClick={() => setQueueOpen(true)}>
+                  <ListMusic size={16} /> Queue
+                </button>
+                <button type="button" className="control-pill" onClick={() => onRequestPlaylist(track)}>
+                  <Plus size={16} /> Playlist
+                </button>
+              </div>
+
+              <div className="volume-row">
+                <button type="button" className="icon-button" aria-label={muted ? 'Unmute' : 'Mute'} onClick={toggleMute}>
+                  {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                </button>
+                <input
+                  className="player-range volume-range"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={muted ? 0 : volume}
+                  style={{ '--range-progress': (muted ? 0 : volume) + '%' }}
+                  onChange={changeVolume}
+                  aria-label="Volume"
+                />
+                <button type="button" className="icon-button subtle" aria-label="Close full video" onClick={() => setExpanded(false)}>
+                  <Maximize2 size={17} />
+                </button>
+              </div>
+            </div>
           )}
         </div>
+      )}
 
-        {expanded ? (
-          <div className="player-expanded-content">
-            <section className="player-full-info">
-              <Artwork track={track} large />
-              <div className="player-full-copy">
-                <h1>{track.title}</h1>
-                <p>{track.artist}</p>
-              </div>
+      <aside className={'player-dock ' + (isPlaying ? 'is-playing' : '')}>
+        <div className="player-dock-body">
+          <button type="button" className="player-track-button" onClick={() => {
+            if (pipVisible) setExpanded(true)
+            else onPlaybackChange({ pipVisible: true }, { sync: false })
+          }} aria-label={pipVisible ? 'Open full player' : 'Show video player'}>
+            <Artwork track={track} />
+            <span className="player-track-copy">
+              <strong>{track.title}</strong>
+              <small>{track.artist}</small>
+            </span>
+          </button>
+
+          <div className="player-dock-actions">
+            <button type="button" className={'icon-button ' + (liked ? 'active' : '')} aria-label={liked ? 'Unlike' : 'Like'} onClick={() => onToggleLike(track)}>
+              <Heart size={18} fill={liked ? 'currentColor' : 'none'} />
+            </button>
+            <button type="button" className="icon-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}>
+              <ListMusic size={18} />
+            </button>
+            {!pipVisible && (
               <button
                 type="button"
-                className={'icon-button ' + (liked ? 'active' : '')}
-                aria-label={liked ? 'Unlike' : 'Like'}
-                onClick={() => onToggleLike(track)}
+                className="icon-button"
+                aria-label="Show video player"
+                onClick={() => onPlaybackChange({ pipVisible: true }, { sync: false })}
               >
-                <Heart size={21} fill={liked ? 'currentColor' : 'none'} />
+                <Maximize2 size={18} />
               </button>
-            </section>
-
-            <div className="progress-area">
-              <input
-                type="range"
-                min="0"
-                max={duration || 0}
-                step="0.1"
-                value={duration ? displayedTime : 0}
-                onChange={handleSeek}
-                onPointerUp={commitSeek}
-                onKeyUp={(event) => {
-                  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) commitSeek()
-                }}
-                aria-label="Seek through track"
-              />
-              <div className="time-row">
-                <span>{formatTime(displayedTime)}</span>
-                <span>{formatTime(duration)}</span>
-              </div>
-            </div>
-
-            <div className="player-controls">
-              <button type="button" className="control-button secondary" aria-label="Previous track" onClick={previousTrack}>
-                <SkipBack size={18} fill="currentColor" />
-              </button>
-              <button type="button" className="control-button primary" aria-label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlayback}>
-                {isLoading
-                  ? <LoaderCircle size={22} className="spin" />
-                  : isPlaying
-                    ? <Pause size={22} fill="currentColor" />
-                    : <Play size={22} fill="currentColor" />}
-              </button>
-              <button type="button" className="control-button secondary" aria-label="Next track" onClick={nextTrack}>
-                <SkipForward size={18} fill="currentColor" />
-              </button>
-            </div>
-
-            <div className="full-secondary-controls">
-              <button type="button" className={'control-pill ' + (shuffle ? 'active' : '')} onClick={() => setShuffle((current) => !current)}>
-                <Shuffle size={16} /> Shuffle
-              </button>
-              <button type="button" className={'control-pill ' + (repeat !== 'off' ? 'active' : '')} onClick={cycleRepeat}>
-                {repeat === 'one' ? <Repeat1 size={16} /> : <Repeat2 size={16} />} Repeat
-              </button>
-              <button type="button" className="control-pill" onClick={() => setQueueOpen(true)}>
-                <ListMusic size={16} /> Queue
-              </button>
-              <button type="button" className="control-pill" onClick={() => onRequestPlaylist(track)}>
-                <Plus size={16} /> Playlist
-              </button>
-            </div>
-
-            <div className="volume-row">
-              <button type="button" className="icon-button" aria-label={muted ? 'Unmute' : 'Mute'} onClick={toggleMute}>
-                {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-              </button>
-              <input type="range" min="0" max="100" value={muted ? 0 : volume} onChange={changeVolume} aria-label="Volume" />
-              <button type="button" className="icon-button subtle" aria-label="Close expanded player" onClick={() => setExpanded(false)}>
-                <Maximize2 size={17} />
-              </button>
-            </div>
+            )}
+            <button type="button" className="mini-play" aria-label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlayback}>
+              {isLoading ? <LoaderCircle size={17} className="spin" /> : isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
+            </button>
           </div>
-        ) : (
-          <>
-            <div className="player-dock-body">
-              <button type="button" className="player-track-button" onClick={() => setExpanded(true)} aria-label="Open full player">
-                <Artwork track={track} />
-                <span className="player-track-copy">
-                  <strong>{track.title}</strong>
-                  <small>{track.artist}</small>
-                </span>
-              </button>
+        </div>
 
-              <div className="player-dock-actions">
-                <button type="button" className={'icon-button ' + (liked ? 'active' : '')} aria-label={liked ? 'Unlike' : 'Like'} onClick={() => onToggleLike(track)}>
-                  <Heart size={18} fill={liked ? 'currentColor' : 'none'} />
-                </button>
-                <button type="button" className="icon-button" aria-label="Open queue" onClick={() => setQueueOpen(true)}>
-                  <ListMusic size={18} />
-                </button>
-                <button type="button" className="mini-play" aria-label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlayback}>
-                  {isLoading ? <LoaderCircle size={17} className="spin" /> : isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
-                </button>
-              </div>
-            </div>
-
-            <div className="mini-progress" aria-hidden="true"><span style={{ width: progress + '%' }} /></div>
-          </>
-        )}
+        <div className="mini-progress" aria-hidden="true"><span style={{ width: progress + '%' }} /></div>
       </aside>
 
       {queueOpen && (
