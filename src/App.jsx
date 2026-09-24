@@ -74,6 +74,7 @@ function App() {
     const stored = readStorage(STORAGE.theme, 'rose')
     return THEMES.includes(stored) ? stored : 'rose'
   })
+  const [themeTransition, setThemeTransition] = useState(null)
   const [playback, setPlayback] = useState(initialPlayback)
   const [likedTracks, setLikedTracks] = useState(() => cleanTracks(readStorage(STORAGE.liked, [], ['krovi-library-v1', 'krovi-liked-songs'])))
   const [recentTracks, setRecentTracks] = useState(() => cleanTracks(readStorage(STORAGE.recent, [], ['krovi-recently-played'])))
@@ -226,9 +227,17 @@ function App() {
         ? position + Math.max(0, (Date.now() - updatedAt) / 1000)
         : position
       const remoteSeekId = typeof message.seekId === 'string' ? message.seekId : ''
-      const shouldSeek = Boolean(remoteSeekId && remoteSeekId !== seekIdRef.current && nextTrack)
-      if (remoteSeekId) seekIdRef.current = remoteSeekId
       const sameTrack = playbackRef.current.currentTrack?.videoId === nextTrack?.videoId
+      const localTime = Math.max(0, Number(playbackRef.current.currentTime) || 0)
+      const shouldSeek = Boolean(
+        nextTrack
+        && (
+          !sameTrack
+          || ['track', 'seek'].includes(message.command)
+          || Math.abs(localTime - currentTime) > 1.25
+        ),
+      )
+      if (remoteSeekId) seekIdRef.current = remoteSeekId
 
       setPlayback((current) => ({
         ...current,
@@ -547,8 +556,16 @@ function App() {
     ...playback.queue,
   ]), [likedTracks, recentTracks, playback.queue])
 
+  const toggleTheme = useCallback(() => {
+    const nextTheme = theme === 'rose' ? 'verdant' : 'rose'
+    setTheme(nextTheme)
+    setThemeTransition(nextTheme)
+    window.setTimeout(() => setThemeTransition(null), 760)
+  }, [theme])
+
   return (
     <div className="app-shell" data-theme={theme}>
+      {themeTransition && <div className={'theme-transition theme-transition-' + themeTransition} aria-hidden="true" />}
       <header className="topbar">
         <button type="button" className="brand-button" onClick={() => setView('home')} aria-label="Krovi home">
           <span className="brand-mark">k</span>
@@ -556,7 +573,7 @@ function App() {
         </button>
 
         <div className="topbar-actions">
-          <ThemeToggle theme={theme} onToggle={() => setTheme((current) => current === 'rose' ? 'verdant' : 'rose')} />
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
           <button type="button" className="connect-button" onClick={openConnect}>
             <Link2 size={17} />
             <span>Connect</span>
@@ -566,6 +583,7 @@ function App() {
       </header>
 
       <main className="main-content">
+        <div className="page-enter" key={view}>
         {view === 'home' && (
           <Home
             recentTracks={recentTracks}
@@ -621,6 +639,7 @@ function App() {
             onExplore={() => setView('explore')}
           />
         )}
+        </div>
       </main>
 
       <nav className="bottom-nav" aria-label="Primary navigation">
