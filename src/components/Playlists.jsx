@@ -264,12 +264,6 @@ export default function Playlists({
   const [editing, setEditing] = useState(null)
 
   useEffect(() => {
-    if (selectedId && !playlists.some((playlist) => playlist.id === selectedId)) {
-      setSelectedId(null)
-    }
-  }, [playlists, selectedId])
-
-  useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
         setFormOpen(false)
