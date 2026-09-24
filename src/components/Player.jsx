@@ -148,6 +148,7 @@ export default function Player({
   const [volume, setVolume] = useState(80)
   const [muted, setMuted] = useState(false)
   const [seekValue, setSeekValue] = useState(null)
+  const [pipPosition, setPipPosition] = useState(playback.pipPosition || null)
 
   const mountRef = useRef(null)
   const playerRef = useRef(null)
@@ -160,6 +161,8 @@ export default function Player({
   const repeatRef = useRef(repeat)
   const volumeRef = useRef(volume)
   const progressTimerRef = useRef(null)
+  const dragRef = useRef(null)
+  const dragMovedRef = useRef(false)
 
   const track = playback.currentTrack
   const isPlaying = playback.isPlaying
@@ -178,6 +181,9 @@ export default function Player({
   useEffect(() => { shuffleRef.current = shuffle }, [shuffle])
   useEffect(() => { repeatRef.current = repeat }, [repeat])
   useEffect(() => { volumeRef.current = volume }, [volume])
+  useEffect(() => {
+    if (!dragRef.current) setPipPosition(playback.pipPosition || null)
+  }, [playback.pipPosition])
 
   const stopProgress = useCallback(() => {
     if (progressTimerRef.current) window.clearInterval(progressTimerRef.current)
@@ -391,6 +397,8 @@ export default function Player({
 
   useEffect(() => () => {
     stopProgress()
+    window.removeEventListener('pointermove', movePip)
+    dragRef.current = null
     playerRef.current?.destroy?.()
     playerRef.current = null
   }, [stopProgress])
@@ -416,6 +424,74 @@ export default function Player({
   }, [expanded, queueOpen])
 
   if (!track) return null
+
+
+  const startPipDrag = (event) => {
+    if (expanded || event.button > 0) return
+
+    const target = event.target
+    if (target.closest('button, input, textarea, a')) return
+
+    const dock = event.currentTarget.closest('.player-dock')
+    if (!dock) return
+
+    const rect = dock.getBoundingClientRect()
+    const currentX = pipPosition?.x ?? rect.left
+    const currentY = pipPosition?.y ?? rect.top
+
+    dragMovedRef.current = false
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startPointerX: event.clientX,
+      startPointerY: event.clientY,
+      startX: currentX,
+      startY: currentY,
+      width: rect.width,
+      height: rect.height,
+    }
+
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    window.addEventListener('pointermove', movePip)
+    window.addEventListener('pointerup', endPipDrag, { once: true })
+  }
+
+  const movePip = (event) => {
+    const drag = dragRef.current
+    if (!drag || event.pointerId !== drag.pointerId) return
+
+    const deltaX = event.clientX - drag.startPointerX
+    const deltaY = event.clientY - drag.startPointerY
+
+    if (Math.hypot(deltaX, deltaY) > 5) {
+      dragMovedRef.current = true
+    }
+
+    const maxX = Math.max(8, window.innerWidth - drag.width - 8)
+    const navReserve = 84
+    const maxY = Math.max(8, window.innerHeight - drag.height - navReserve)
+
+    const nextPosition = {
+      x: Math.min(maxX, Math.max(8, drag.startX + deltaX)),
+      y: Math.min(maxY, Math.max(8, drag.startY + deltaY)),
+    }
+
+    setPipPosition(nextPosition)
+  }
+
+  const endPipDrag = (event) => {
+    const drag = dragRef.current
+    if (!drag || event.pointerId !== drag.pointerId) return
+
+    dragRef.current = null
+    window.removeEventListener('pointermove', movePip)
+
+    if (dragMovedRef.current) {
+      const position = pipPosition
+      if (position) {
+        onPlaybackChange({ pipPosition: position }, { sync: false })
+      }
+    }
+  }
 
   const togglePlayback = () => {
     const player = playerRef.current
@@ -487,7 +563,16 @@ export default function Player({
     <>
       {expanded && <div className="player-backdrop" aria-hidden="true" />}
 
-      <aside className={'player-dock ' + (expanded ? 'is-expanded' : '')}>
+      <aside
+        className={'player-dock ' + (expanded ? 'is-expanded' : '') + (isPlaying ? ' is-playing' : '') + (pipPosition && !expanded ? ' is-floating' : '')}
+        style={!expanded && pipPosition ? {
+          left: pipPosition.x + 'px',
+          top: pipPosition.y + 'px',
+          right: 'auto',
+          bottom: 'auto',
+          transform: 'none',
+        } : undefined}
+      >
         {expanded ? (
           <header className="player-full-header">
             <button type="button" className="icon-button" aria-label="Close player" onClick={() => setExpanded(false)}>
@@ -503,7 +588,21 @@ export default function Player({
         <div className="player-video">
           <div className="youtube-mount" ref={mountRef} />
           <div className="player-video-grain" aria-hidden="true" />
-          {!expanded && <button type="button" className="player-video-open" aria-label="Expand player" onClick={() => setExpanded(true)} />}
+          {!expanded && (
+            <button
+              type="button"
+              className="player-video-open"
+              aria-label="Expand or move player"
+              onPointerDown={startPipDrag}
+              onClick={() => {
+                if (dragMovedRef.current) {
+                  dragMovedRef.current = false
+                  return
+                }
+                setExpanded(true)
+              }}
+            />
+          )}
         </div>
 
         {expanded ? (
