@@ -1,7 +1,7 @@
 {
   "name": "krovi-music",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev:client": "vite",
@@ -11,8 +11,9 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test": "npm run test:server",
     "test:server": "node scripts/server-smoke.mjs",
-    "test": "npm run test:server"
+    "check": "npm run test:server && npm run lint && npm run build"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
