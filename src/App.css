@@ -2265,6 +2265,7 @@ input[type="range"] {
 .startup-screen {
   position: fixed;
   inset: 0;
+  padding: var(--safe-top) 0 var(--safe-bottom);
   z-index: 999;
   display: grid;
   place-items: center;
@@ -2330,6 +2331,7 @@ input[type="range"] {
 
 .startup-lockup {
   position: relative;
+  margin-top: calc(var(--safe-top) * .12);
   z-index: 2;
   display: grid;
   justify-items: center;
