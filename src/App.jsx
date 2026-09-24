@@ -74,6 +74,15 @@ function uniqueTracks(tracks) {
   return [...new Map(cleanTracks(tracks).map((track) => [track.videoId, track])).values()]
 }
 
+function persistPlaybackState(playback) {
+  writeStorage(STORAGE.playback, {
+    currentTrack: playback.currentTrack,
+    queue: playback.queue,
+    currentTime: playback.currentTime,
+    pipPosition: playback.pipPosition,
+  })
+}
+
 function initialPlayback() {
   const stored = readStorage(STORAGE.playback, {}, ['krovi-playback-v1'])
   const currentTrack = isTrack(stored.currentTrack) ? normalizeTrack(stored.currentTrack) : null
@@ -168,13 +177,14 @@ function App() {
   useEffect(() => writeStorage(STORAGE.playlists, playlists), [playlists])
   useEffect(() => writeStorage(STORAGE.searches, searches.slice(0, 8)), [searches])
   useEffect(() => {
-    writeStorage(STORAGE.playback, {
-      currentTrack: playback.currentTrack,
-      queue: playback.queue,
-      currentTime: playback.currentTime,
-      pipPosition: playback.pipPosition,
-    })
-  }, [playback])
+    persistPlaybackState(playback)
+  }, [playback.currentTrack, playback.queue, playback.pipPosition])
+
+  useEffect(() => {
+    const persistBeforeLeave = () => persistPlaybackState(playbackRef.current)
+    window.addEventListener('pagehide', persistBeforeLeave)
+    return () => window.removeEventListener('pagehide', persistBeforeLeave)
+  }, [])
 
   useEffect(() => subscribeToConnection((message) => {
     if (message.state) setConnectStatus(message.state)
