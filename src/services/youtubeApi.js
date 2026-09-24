@@ -1,8 +1,9 @@
-const DEFAULT_ENDPOINT = '/api/youtube/search'
+const DEFAULT_API_BASE_URL = 'https://krovi-music.onrender.com'
 
 function searchEndpoint() {
-  const base = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
-  return base ? base + '/api/youtube/search' : DEFAULT_ENDPOINT
+  const configured = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
+  const base = configured || DEFAULT_API_BASE_URL
+  return base + '/api/youtube/search'
 }
 
 function normalizeResult(item) {
