@@ -234,6 +234,38 @@ button:disabled {
   transform: translateY(-2px);
 }
 
+.theme-toggle {
+  position: relative;
+  overflow: hidden;
+}
+
+.theme-toggle::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 9px;
+  transform: scale(.45) rotate(-18deg);
+  opacity: 0;
+  transition: transform 420ms var(--ease-spring), opacity 260ms ease;
+}
+
+.theme-toggle:hover::before,
+.theme-toggle:focus-visible::before {
+  transform: scale(1) rotate(0deg);
+  opacity: 1;
+}
+
+.theme-toggle svg {
+  position: relative;
+  z-index: 1;
+  transition: transform 520ms var(--ease-spring);
+}
+
+.theme-toggle:active svg {
+  transform: rotate(25deg) scale(.78);
+}
+
 .icon-button.active {
   color: var(--accent);
 }
@@ -617,6 +649,12 @@ button:disabled {
 
 .track-tile:hover .tile-play {
   transform: translateX(2px) scale(1.06);
+}
+
+.track-tile:active,
+.result-card:active,
+.hero-search-button:active {
+  transform: translateY(1px) scale(.985);
 }
 
 .direction-list {
@@ -1224,6 +1262,25 @@ button:disabled {
   aspect-ratio: 16 / 9;
 }
 
+.pip-player.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(.88) translateY(12px);
+  transition:
+    opacity 260ms ease,
+    transform 380ms var(--ease-spring),
+    visibility 0s linear 380ms;
+}
+
+.pip-player:not(.is-hidden) {
+  visibility: visible;
+  opacity: 1;
+  transition:
+    opacity 280ms ease,
+    transform 380ms var(--ease-spring);
+}
+
 .pip-drag-handle,
 .pip-close-button,
 .pip-full-button {
@@ -1267,6 +1324,12 @@ button:disabled {
 .pip-full-button:hover {
   background: rgb(13 9 12 / 90%);
   transform: scale(1.08);
+}
+
+.pip-drag-handle:active,
+.pip-close-button:active,
+.pip-full-button:active {
+  transform: scale(.88);
 }
 
 .pip-player:not(.is-expanded) .player-video::after {
@@ -2681,8 +2744,22 @@ input[type="range"] {
 
 .theme-transition-verdant {
   background:
-    radial-gradient(circle at 22% 18%, rgb(244 224 190 / 18%), transparent 23%),
+    radial-gradient(circle at 22% 18%, rgb(246 218 183 / 18%), transparent 23%),
     #1c211d;
+}
+
+[data-theme="rose"] .app-shell::before {
+  background:
+    radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--accent-secondary) 17%, transparent), transparent 20%),
+    radial-gradient(circle at 78% 72%, color-mix(in srgb, var(--decor) 14%, transparent), transparent 22%),
+    radial-gradient(circle at 54% 34%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 18%);
+}
+
+[data-theme="verdant"] .app-shell::before {
+  background:
+    radial-gradient(circle at 15% 18%, color-mix(in srgb, var(--accent-secondary) 13%, transparent), transparent 20%),
+    radial-gradient(circle at 82% 76%, color-mix(in srgb, var(--decor) 12%, transparent), transparent 25%),
+    radial-gradient(circle at 52% 30%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 18%);
 }
 
 @media (min-width: 561px) {
