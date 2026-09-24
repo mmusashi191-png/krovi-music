@@ -2,9 +2,6 @@ import { spawn } from 'node:child_process'
 import assert from 'node:assert/strict'
 import WebSocket from 'ws'
 
-const assert = require('node:assert/strict')
-const WebSocket = require('ws')
-
 const port = 8899
 const server = spawn(process.execPath, ['server.cjs'], {
   env: { ...process.env, PORT: String(port) },
