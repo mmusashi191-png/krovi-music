@@ -57,11 +57,11 @@ UI
 - no broad selector overrides or duplicate CSS blocks
 
 ## Required verification gates
-[ ] Repository cleanup
-[ ] Persistent architecture/checkpoint files
-[ ] Design tokens
-[ ] Rosé theme
-[ ] Verdant theme
+[x] Repository cleanup
+[x] Persistent architecture/checkpoint files
+[x] Design tokens
+[x] Rosé theme
+[x] Verdant theme
 [ ] New mobile app shell
 [ ] New Home
 [ ] New Explore/search
@@ -89,6 +89,7 @@ Phase 1 — Foundation
 1. Dedicated rebuild branch created.
 2. Recovery branch exists.
 3. Rebuild rules are recorded here.
+4. Foundation, tokens, themes, repository ignores, deployment config, and CI guardrails are in place.
 
 ## Change log
 - Keep commits grouped by coherent architectural change.
