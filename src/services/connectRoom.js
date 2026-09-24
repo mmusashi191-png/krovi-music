@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core'
+
 const CLIENT_ID_KEY = 'krovi-connect-client-v4'
 const DEFAULT_CONNECT_URL = 'wss://krovi-music.onrender.com/ws'
 
@@ -27,7 +29,7 @@ function getWebSocketUrl() {
     && /^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(configured)
   if (configured && !isStaleProductionLocalUrl) return configured
 
-  const isNativeApp = Boolean(window.Capacitor?.isNativePlatform?.())
+  const isNativeApp = Capacitor.isNativePlatform()
   const host = window.location.hostname
 
   // Capacitor's Android WebView uses a localhost-like origin, but the
