@@ -200,7 +200,7 @@ export default function Player({
     const target = event.target
     if (target.closest('button, input, textarea, a')) return
 
-    const dock = event.currentTarget.closest('.player-dock')
+    const dock = event.currentTarget.closest('.pip-player')
     if (!dock) return
 
     const rect = dock.getBoundingClientRect()
