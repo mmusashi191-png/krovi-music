@@ -29,13 +29,7 @@ export async function searchYouTube(query, signal) {
   if (value.length < 2) return []
 
   const response = await fetch(searchEndpoint() + '?q=' + encodeURIComponent(value), { signal })
-  let payload = null
-
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
+  const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
     const error = new Error(payload?.error || 'YouTube search is temporarily unavailable.')
