@@ -76,9 +76,9 @@ UI
 [ ] Two-device queue sync
 [ ] Chat verification
 [ ] Disconnect/reconnect verification
-[ ] Clean install
-[ ] Lint
-[ ] Production build
+[x] Clean install
+[x] Lint
+[x] Production build
 [ ] Final tree audit
 [ ] Final UX pass
 
@@ -86,10 +86,15 @@ UI
 Phase 1 — Foundation
 
 ## Current checkpoint
-1. Dedicated rebuild branch created.
-2. Recovery branch exists.
-3. Rebuild rules are recorded here.
+1. Dedicated rebuild branch: rebuild/professional-foundation.
+2. Recovery branch: before-professional-rebuild-20260924.
+3. Rebuild rules and architecture are recorded in this directory.
 4. Foundation, tokens, themes, repository ignores, deployment config, and CI guardrails are in place.
+5. The latest fully passing verification run completed npm ci, lint, and production build.
+6. The Connect server smoke test passed in two clean runs; one later run exposed the test file's ESM/CommonJS mismatch, which has since been corrected. A fresh verification after that correction is still required.
+7. The hosted Render health endpoint could not be reached by the available verifier, so production WebSocket connectivity is not marked verified.
+8. True drag-anywhere PiP is not yet implemented in the rebuilt player and must remain on the checklist.
+9. Do not mark screen/player/Connect verification gates complete merely because they build; they require actual phone/two-client testing.
 
 ## Change log
 - Keep commits grouped by coherent architectural change.
