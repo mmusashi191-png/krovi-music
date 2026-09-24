@@ -1,31 +1,42 @@
-# Dependencies
+# Dependencies and builds
 node_modules/
-
-# Production output
 dist/
+dist-ssr/
+coverage/
 
-# Local environment
+# Capacitor / native generated output
+android/.gradle/
+android/.idea/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/
+android/local.properties
+ios/App/Pods/
+ios/App/build/
+
+# Local backups and scratch files
+.sync-backup-*/
+*.before-*
+*.tmp
+*.bak
+
+# Environment
 .env
 .env.*
 !.env.example
 
-# Editor / OS
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editors / OS
 .vscode/*
 !.vscode/extensions.json
 .idea/
 .DS_Store
+*.suo
 *.sw?
-
-# Android / Capacitor generated output
-android/app/build/
-android/.gradle/
-android/.idea/
-android/capacitor-cordova-android-plugins/
-android/build/
-android/captures/
-android/gradle/wrapper/gradle-wrapper.jar
-
-# Local recovery / generated snapshots
-.sync-backup-*/
-*.before-*
-*.bak
