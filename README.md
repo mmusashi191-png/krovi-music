@@ -1,16 +1,32 @@
-# React + Vite
+# Krovi Music
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Krovi is a phone-first music discovery and shared listening experience built with React, Vite, a small Node server, and WebSockets.
 
-Currently, two official plugins are available:
+## Product
+- Search YouTube music through the server API.
+- Play videos through the official YouTube IFrame Player.
+- Keep favourites, recent plays, queues, and playlists locally.
+- Create or join a private two-person listening room.
+- Synchronize track selection, playback, seeking, queue state, presence, and chat.
+- Switch between the Rosé and Verdant visual themes.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Local development
+```bash
+npm install
+npm run dev
+```
+Vite uses port `5173`; the Node server uses port `8787`.
+For a local Connect room, the client automatically uses the local server.
+For a hosted frontend, set `VITE_CONNECT_WS_URL` to the deployed WebSocket endpoint before building.
+The server requires `YOUTUBE_API_KEY`.
 
-## React Compiler
+## Verification
+```bash
+npm run lint
+npm run build
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+See `docs/ARCHITECTURE.md` and `docs/REBUILD_CHECKLIST.md` for the project boundaries and rebuild gates.
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Scope
+Krovi intentionally uses the official YouTube player for YouTube playback. It does not extract or proxy YouTube audio streams.
