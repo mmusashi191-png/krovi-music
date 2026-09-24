@@ -610,6 +610,58 @@ export default function Player({
     return () => window.removeEventListener('krovi-native-media-command', handleNativeCommand)
   }, [nextTrack, previousTrack, togglePlayback])
 
+  useEffect(() => {
+    if (!track || !('mediaSession' in navigator)) return undefined
+
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: track.title,
+        artist: track.artist,
+        album: 'Krovi Music',
+        artwork: track.thumbnail
+          ? [{ src: track.thumbnail, sizes: '96x96', type: 'image/jpeg' }]
+          : [],
+      })
+
+      const setHandler = (action, handler) => {
+        try {
+          navigator.mediaSession.setActionHandler(action, handler)
+        } catch {
+          // Some actions are not supported on every Android/WebView build.
+        }
+      }
+
+      setHandler('play', () => {
+        if (!playingRef.current) togglePlayback()
+      })
+      setHandler('pause', () => {
+        if (playingRef.current) togglePlayback()
+      })
+      setHandler('previoustrack', previousTrack)
+      setHandler('nexttrack', nextTrack)
+    } catch {
+      // MediaSession is an optional enhancement.
+    }
+
+    return () => {
+      try {
+        navigator.mediaSession.metadata = null
+      } catch {
+        // Ignore teardown differences across WebView versions.
+      }
+    }
+  }, [nextTrack, previousTrack, togglePlayback, track])
+
+  useEffect(() => {
+    const resumeVisiblePlayback = () => {
+      if (document.visibilityState !== 'visible' || !playingRef.current) return
+      playerRef.current?.playVideo?.()
+    }
+
+    document.addEventListener('visibilitychange', resumeVisiblePlayback)
+    return () => document.removeEventListener('visibilitychange', resumeVisiblePlayback)
+  }, [])
+
   return (
     <>
       {expanded && <div className="player-backdrop" aria-hidden="true" />}
