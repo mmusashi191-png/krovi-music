@@ -142,7 +142,7 @@ function App() {
   useEffect(() => writeStorage(STORAGE.playlists, playlists), [playlists])
   useEffect(() => writeStorage(STORAGE.searches, searches.slice(0, 8)), [searches])
   useEffect(() => {
-    persistPlaybackState(playback)
+    persistPlaybackState(playbackRef.current)
   }, [playback.currentTrack, playback.queue, playback.pipPosition])
 
   useEffect(() => {
@@ -160,7 +160,7 @@ function App() {
   }), [])
 
   useEffect(() => {
-    if (!connectRoom?.roomCode) return undefined
+    if (!roomCode) return undefined
 
     roomVersionRef.current = 0
     seekIdRef.current = ''
