@@ -1,9 +1,24 @@
-const DEFAULT_API_BASE_URL = 'https://krovi-music.onrender.com'\nconst SEARCH_TIMEOUT_MS = 12_000
+const DEFAULT_API_BASE_URL = 'https://krovi-music.onrender.com'
+const SEARCH_TIMEOUT_MS = 12_000
+
+function configuredBaseUrl() {
+  const value = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
+  if (!value) return ''
+  if (
+    import.meta.env.PROD
+    && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(value)
+  ) {
+    return ''
+  }
+  return value
+}
+
+function apiBaseUrl() {
+  return configuredBaseUrl() || DEFAULT_API_BASE_URL
+}
 
 function searchEndpoint() {
-  const configured = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
-  const base = configured || DEFAULT_API_BASE_URL
-  return base + '/api/youtube/search'
+  return apiBaseUrl() + '/api/youtube/search'
 }
 
 function normalizeResult(item) {
@@ -41,7 +56,9 @@ export async function searchYouTube(query, signal) {
   let response
 
   try {
-    response = await fetch(searchEndpoint() + '?q=' + encodeURIComponent(value), { signal: controller.signal })
+    response = await fetch(searchEndpoint() + '?q=' + encodeURIComponent(value), {
+      signal: controller.signal,
+    })
   } finally {
     window.clearTimeout(timeout)
     signal?.removeEventListener('abort', abortFromCaller)
@@ -60,12 +77,6 @@ export async function searchYouTube(query, signal) {
     .filter(Boolean)
 }
 
-
 export function warmYouTubeService() {
-  const base = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
-  const endpoint = base
-    ? base + '/health'
-    : DEFAULT_API_BASE_URL + '/health'
-
-  fetch(endpoint, { cache: 'no-store' }).catch(() => {})
+  fetch(apiBaseUrl() + '/health', { cache: 'no-store' }).catch(() => {})
 }
