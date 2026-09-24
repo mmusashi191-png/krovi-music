@@ -505,10 +505,7 @@ export default function Player({
     }
   }, [expanded, queueOpen])
 
-  if (!track) return null
-
-
-  const togglePlayback = () => {
+  const togglePlayback = useCallback(() => {
     const player = playerRef.current
     if (!player) return
 
@@ -523,7 +520,7 @@ export default function Player({
       sync: true,
       command: 'playback',
     })
-  }
+  }, [onPlaybackChange])
 
   const handleSeek = (event) => {
     const next = Number(event.target.value)
@@ -661,6 +658,8 @@ export default function Player({
     document.addEventListener('visibilitychange', resumeVisiblePlayback)
     return () => document.removeEventListener('visibilitychange', resumeVisiblePlayback)
   }, [])
+
+  if (!track) return null
 
   return (
     <>
