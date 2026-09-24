@@ -40,6 +40,8 @@ public class MainActivity extends BridgeActivity {
         webView = getBridge().getWebView();
         if (webView == null) return;
 
+        webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
+
         webView.addJavascriptInterface(
             new KroviMediaJsBridge(this),
             "KroviMedia"
