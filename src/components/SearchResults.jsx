@@ -1,18 +1,95 @@
 import { AlertCircle, Heart, ListPlus, Play, RefreshCw, SkipForward } from 'lucide-react'
 
-function SearchResults({ results, isLoading, error, hasSearched, onRetry, onSelect, onAddToQueue, onPlayNext, likedTracks, onToggleLike, onRequestPlaylist }) {
-  if (isLoading) return <div className="search-results skeleton-results" aria-label="Loading search results">{[1, 2, 3, 4].map((item) => <div className="result-skeleton" key={item}><span /><span /><span /></div>)}</div>
-  if (error) return <div className="explore-state setup-state"><span className="setup-icon"><AlertCircle size={20} /></span><h3>That search hit a snag</h3><p>{error}</p><button type="button" className="primary-button retry-button" onClick={onRetry}><RefreshCw size={15} /> Try again</button></div>
-  if (hasSearched && !results.length) return <div className="explore-state"><p>No videos found for that search.</p><small>Try an artist, song title, or album.</small></div>
-  if (!hasSearched) return <div className="explore-state explore-empty"><span className="empty-orbit">✦</span><h3>Find something worth listening to</h3><p>Search YouTube for a song, artist, album, or video.</p></div>
+export default function SearchResults({
+  results,
+  isLoading,
+  error,
+  hasSearched,
+  onRetry,
+  onSelect,
+  onAddToQueue,
+  onPlayNext,
+  likedTracks,
+  onToggleLike,
+  onRequestPlaylist,
+}) {
+  if (isLoading) {
+    return (
+      <div className="results-list">
+        {[1, 2, 3, 4, 5].map((item) => (
+          <div className="result-skeleton" key={item}>
+            <span />
+            <span />
+            <span />
+          </div>
+        ))}
+      </div>
+    )
+  }
 
-  return <div className="search-results" aria-live="polite">{results.map((result) => {
-    const liked = likedTracks?.some((track) => track.videoId === result.videoId)
-    return <article className="result-card" key={result.videoId}>
-      <button type="button" className="result-card-main" onClick={() => onSelect(result, true, results)}><span className="result-thumbnail">{result.thumbnail ? <img src={result.thumbnail} alt={`Thumbnail for ${result.title}`} /> : <span className="result-fallback" aria-label="No thumbnail available">K</span>}<span className="result-play"><Play size={16} fill="currentColor" /></span></span><span className="result-copy"><strong>{result.title}</strong><small>{result.artist}</small><span className="result-duration">{result.duration || 'YouTube video'}</span></span></button>
-      <div className="result-actions"><button type="button" aria-label={`Add ${result.title} to queue`} title="Add to queue" onClick={() => onAddToQueue(result)}><ListPlus size={15} /></button><button type="button" aria-label={`Play ${result.title} next`} title="Play next" onClick={() => onPlayNext(result)}><SkipForward size={15} /></button><button type="button" aria-label={`Add ${result.title} to playlist`} title="Add to playlist" onClick={() => onRequestPlaylist(result)}><ListPlus size={15} /></button><button type="button" className={liked ? 'liked' : ''} aria-label={liked ? `Unlike ${result.title}` : `Like ${result.title}`} title={liked ? 'Unlike' : 'Like'} onClick={() => onToggleLike(result)}><Heart size={15} fill={liked ? 'currentColor' : 'none'} /></button></div>
-    </article>
-  })}</div>
+  if (error) {
+    return (
+      <div className="state-card">
+        <AlertCircle size={21} />
+        <h3>Search is unavailable.</h3>
+        <p>{error}</p>
+        <button type="button" className="primary-button" onClick={onRetry}>
+          <RefreshCw size={15} /> Try again
+        </button>
+      </div>
+    )
+  }
+
+  if (hasSearched && !results.length) {
+    return (
+      <div className="state-card">
+        <h3>No matches found.</h3>
+        <p>Try a shorter phrase or the exact artist and song title.</p>
+      </div>
+    )
+  }
+
+  if (!hasSearched) return null
+
+  return (
+    <div className="results-list">
+      {results.map((result, index) => {
+        const liked = likedTracks.some((track) => track.videoId === result.videoId)
+
+        return (
+          <article
+            className="result-card section-reveal"
+            style={{ '--delay': index * 45 + 'ms' }}
+            key={result.videoId}
+          >
+            <button type="button" className="result-main" onClick={() => onSelect(result)}>
+              <span className="result-thumb">
+                {result.thumbnail ? <img src={result.thumbnail} alt="" /> : <span>K</span>}
+                <i><Play size={13} fill="currentColor" /></i>
+              </span>
+              <span className="result-copy">
+                <strong>{result.title}</strong>
+                <small>{result.artist}</small>
+              </span>
+            </button>
+
+            <div className="result-actions">
+              <button type="button" title="Queue" aria-label={'Add ' + result.title + ' to queue'} onClick={() => onAddToQueue(result)}>
+                <ListPlus size={16} />
+              </button>
+              <button type="button" title="Play next" aria-label={'Play ' + result.title + ' next'} onClick={() => onPlayNext(result)}>
+                <SkipForward size={16} />
+              </button>
+              <button type="button" title="Playlist" aria-label={'Add ' + result.title + ' to a playlist'} onClick={() => onRequestPlaylist(result)}>
+                <span className="list-plus-mark">+</span>
+              </button>
+              <button type="button" className={liked ? 'liked' : ''} title={liked ? 'Unlike' : 'Like'} aria-label={liked ? 'Unlike ' + result.title : 'Like ' + result.title} onClick={() => onToggleLike(result)}>
+                <Heart size={16} fill={liked ? 'currentColor' : 'none'} />
+              </button>
+            </div>
+          </article>
+        )
+      })}
+    </div>
+  )
 }
-
-export default SearchResults
