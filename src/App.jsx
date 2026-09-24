@@ -7,7 +7,9 @@ import Home from './components/Home.jsx'
 import Player from './components/Player.jsx'
 import Playlists, { PlaylistPicker } from './components/Playlists.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
-import { searchYouTube } from './services/youtubeApi.js'
+import { readStorage, writeStorage } from './lib/storage.js'
+import { cleanTracks, isTrack, normalizeTrack, uniqueTracks } from './lib/tracks.js'
+import { searchYouTube, warmYouTubeService } from './services/youtubeApi.js'
 import {
   connectConfigMessage,
   createRoom,
@@ -30,49 +32,6 @@ const STORAGE = {
 }
 
 const THEMES = ['rose', 'verdant']
-
-function readStorage(key, fallback, legacyKeys = []) {
-  try {
-    for (const storageKey of [key, ...legacyKeys]) {
-      const raw = window.localStorage.getItem(storageKey)
-      if (raw == null) continue
-      return JSON.parse(raw)
-    }
-  } catch {
-    return fallback
-  }
-  return fallback
-}
-
-function writeStorage(key, value) {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    // Local persistence is optional.
-  }
-}
-
-function isTrack(track) {
-  return Boolean(track?.videoId && track?.title)
-}
-
-function normalizeTrack(track) {
-  return {
-    videoId: String(track.videoId),
-    title: String(track.title),
-    artist: String(track.artist || 'YouTube'),
-    thumbnail: typeof track.thumbnail === 'string' ? track.thumbnail : '',
-    duration: typeof track.duration === 'string' ? track.duration : '',
-  }
-}
-
-function cleanTracks(value) {
-  return Array.isArray(value) ? value.filter(isTrack).map(normalizeTrack) : []
-}
-
-function uniqueTracks(tracks) {
-  return [...new Map(cleanTracks(tracks).map((track) => [track.videoId, track])).values()]
-}
 
 function persistPlaybackState(playback) {
   writeStorage(STORAGE.playback, {
@@ -190,6 +149,10 @@ function App() {
     const persistBeforeLeave = () => persistPlaybackState(playbackRef.current)
     window.addEventListener('pagehide', persistBeforeLeave)
     return () => window.removeEventListener('pagehide', persistBeforeLeave)
+  }, [])
+
+  useEffect(() => {
+    warmYouTubeService()
   }, [])
 
   useEffect(() => subscribeToConnection((message) => {
