@@ -174,6 +174,7 @@ export default function Player({
 
   const track = playback.currentTrack
   const isPlaying = playback.isPlaying
+  const pipVisible = Boolean(playback.pipVisible)
   const isLoading = playback.isLoading
   const duration = playback.duration
   const displayedTime = seekValue ?? playback.currentTime
