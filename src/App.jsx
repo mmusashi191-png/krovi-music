@@ -132,7 +132,7 @@ function App() {
     const themeColor = document.querySelector('meta[name="theme-color"]')
 
     if (themeColor) {
-      themeColor.setAttribute('content', theme === 'verdant' ? '#1d281f' : '#eee7e9')
+      themeColor.setAttribute('content', theme === 'verdant' ? '#1c211d' : '#f3e9e4')
     }
 
     writeStorage(STORAGE.theme, theme)
@@ -175,7 +175,7 @@ function App() {
         return
       }
 
-      if (message.type === 'presence-state') {
+      if (message.type === 'presence-state' || message.type === 'presence-update') {
         setConnectRoom((room) => room
           ? { ...room, participantCount: Math.max(1, Number(message.participantCount) || 1) }
           : room)
@@ -252,7 +252,7 @@ function App() {
         pipVisible: Boolean(nextTrack),
         isLoading: false,
         error: '',
-        seekRequest: shouldSeek && ['track', 'seek'].includes(message.command)
+        seekRequest: shouldSeek
           ? {
               videoId: nextTrack.videoId,
               time: Number.isFinite(Number(message.seekPosition))
