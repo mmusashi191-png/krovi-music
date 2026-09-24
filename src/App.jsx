@@ -143,6 +143,8 @@ function App() {
   const [connectError, setConnectError] = useState('')
   const [chatMessages, setChatMessages] = useState([])
 
+  const roomCode = connectRoom?.roomCode || ''
+
   const playbackRef = useRef(playback)
   const roomVersionRef = useRef(0)
   const seekIdRef = useRef('')
@@ -178,10 +180,7 @@ function App() {
 
     roomVersionRef.current = 0
     seekIdRef.current = ''
-    setChatMessages([])
-    setConnectError('')
-
-    return subscribeToRoom(connectRoom.roomCode, (message) => {
+    return subscribeToRoom(roomCode, (message) => {
       if (message.type === 'error') {
         setConnectError(message.message || connectConfigMessage)
         if (message.code === 'ROOM_NOT_FOUND') {
@@ -272,7 +271,7 @@ function App() {
           : null,
       }))
     })
-  }, [connectRoom?.roomCode])
+  }, [roomCode])
 
   const commitPlayback = useCallback((changes, options = {}) => {
     const next = {
@@ -284,13 +283,13 @@ function App() {
     playbackRef.current = next
     setPlayback(next)
 
-    if (options.sync && connectRoom?.roomCode) {
-      updatePlaybackState(connectRoom.roomCode, next, {
+    if (options.sync && roomCode) {
+      updatePlaybackState(roomCode, next, {
         command: options.command || 'playback',
         seekPosition: options.seekPosition,
       }).catch(() => setConnectError('Connect lost its network connection.'))
     }
-  }, [connectRoom?.roomCode])
+  }, [roomCode])
 
   const commitQueue = useCallback((queue) => {
     const cleaned = cleanTracks(queue)
@@ -306,11 +305,11 @@ function App() {
     playbackRef.current = next
     setPlayback(next)
 
-    if (connectRoom?.roomCode) {
-      updateQueue(connectRoom.roomCode, cleaned)
+    if (roomCode) {
+      updateQueue(roomCode, cleaned)
         .catch(() => setConnectError('Queue could not be shared with the room.'))
     }
-  }, [connectRoom?.roomCode])
+  }, [roomCode])
 
   const selectTrack = useCallback((track, shouldPlay = false, nextQueue = null) => {
     if (!isTrack(track)) return
@@ -332,11 +331,11 @@ function App() {
       error: '',
       seekRequest: null,
     }, {
-      sync: Boolean(connectRoom?.roomCode),
+      sync: Boolean(roomCode),
       command: 'track',
       seekPosition: 0,
     })
-  }, [commitPlayback, connectRoom?.roomCode])
+  }, [commitPlayback, roomCode])
 
   const rememberPlayed = useCallback((track) => {
     if (!isTrack(track)) return
@@ -401,6 +400,7 @@ function App() {
       query,
       submittedQuery: query,
       results: [],
+      loading: true,
       error: '',
     }))
     setSearches((current) => [
@@ -415,8 +415,6 @@ function App() {
 
     const controller = new AbortController()
     const query = search.submittedQuery
-    setSearch((current) => ({ ...current, loading: true, error: '' }))
-
     searchYouTube(query, controller.signal)
       .then((results) => {
         if (controller.signal.aborted) return
@@ -515,6 +513,7 @@ function App() {
     try {
       const room = await createRoom(playbackRef.current)
       setConnectRoom(room)
+      setChatMessages([])
       setConnectOpen(true)
     } catch (error) {
       setConnectError(error.message || connectConfigMessage)
@@ -541,13 +540,13 @@ function App() {
   }, [])
 
   const handleSendChat = useCallback(async (message) => {
-    if (!connectRoom?.roomCode) return
+    if (!roomCode) return
     try {
-      await sendChatMessage(connectRoom.roomCode, message)
+      await sendChatMessage(roomCode, message)
     } catch {
       setConnectError('Message could not be sent.')
     }
-  }, [connectRoom?.roomCode])
+  }, [roomCode])
 
   const availableLibraryTracks = useMemo(() => uniqueTracks([
     ...likedTracks,
