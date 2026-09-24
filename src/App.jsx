@@ -188,7 +188,7 @@ function App() {
       }
 
       if (message.type === 'queue-state') {
-        const version = Number(message.version) || 0
+        const version = Number(message.version || message.syncVersion) || 0
         if (version && version <= roomVersionRef.current) return
         if (version) roomVersionRef.current = version
         setPlayback((current) => {
@@ -558,9 +558,9 @@ function App() {
 
   const toggleTheme = useCallback(() => {
     const nextTheme = theme === 'rose' ? 'verdant' : 'rose'
-    setTheme(nextTheme)
     setThemeTransition(nextTheme)
-    window.setTimeout(() => setThemeTransition(null), 760)
+    window.requestAnimationFrame(() => setTheme(nextTheme))
+    window.setTimeout(() => setThemeTransition(null), 820)
   }, [theme])
 
   return (
