@@ -19,6 +19,11 @@ ios/App/build/
 *.before-*
 *.tmp
 *.bak
+android-old-backup/
+apply-krovi-*.py
+fix-krovi-*.py
+*-atomic-sync-backup-*
+*-sync-stable-backup-*
 
 # Environment
 .env
