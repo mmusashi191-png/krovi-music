@@ -10,7 +10,8 @@
     "dev": "concurrently -k \"node server.cjs\" \"vite --host 0.0.0.0 --port 5173\"",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:server": "node scripts/server-smoke.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
