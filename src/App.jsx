@@ -1,494 +1,686 @@
-import { useEffect, useRef, useState } from 'react'
-import { ChevronRight, Compass, Home, Library, UserRound } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Compass, Library, Link2, Home as HomeIcon } from 'lucide-react'
 import './App.css'
 import Connect from './components/Connect.jsx'
-import Player from './components/Player.jsx'
-import PersonalizedHome from './components/Home.jsx'
 import Explore from './components/Explore.jsx'
+import Home from './components/Home.jsx'
+import Player from './components/Player.jsx'
 import Playlists, { PlaylistPicker } from './components/Playlists.jsx'
-import { searchMood, searchYouTube } from './services/youtubeApi.js'
-import { connectConfigMessage, createRoom, isConnectConfigured, joinRoom, leaveRoom, subscribeToPresence, subscribeToRoom, updatePlaybackState } from './services/connectRoom.js'
+import ThemeToggle from './components/ThemeToggle.jsx'
+import { searchYouTube } from './services/youtubeApi.js'
+import {
+  connectConfigMessage,
+  createRoom,
+  joinRoom,
+  leaveRoom,
+  sendChatMessage,
+  subscribeToConnection,
+  subscribeToRoom,
+  updatePlaybackState,
+  updateQueue,
+} from './services/connectRoom.js'
 
-const RECENT_STORAGE_KEY = 'krovi-recently-played'
-const LIKED_STORAGE_KEY = 'krovi-library-v1'
-const LEGACY_LIKED_STORAGE_KEY = 'krovi-liked-songs'
-const QUEUE_STORAGE_KEY = 'krovi-queue'
-const PLAYBACK_STORAGE_KEY = 'krovi-playback-v1'
-const PLAYLISTS_STORAGE_KEY = 'krovi-playlists-v1'
-const SEARCHES_STORAGE_KEY = 'krovi-recent-searches'
-const ACTIVE_VIEW_STORAGE_KEY = 'krovi-active-view-v1'
+const STORAGE = {
+  liked: 'krovi-liked-v3',
+  recent: 'krovi-recent-v3',
+  playlists: 'krovi-playlists-v3',
+  playback: 'krovi-playback-v3',
+  searches: 'krovi-searches-v3',
+  theme: 'krovi-theme-v3',
+}
 
-function readStoredTracks(key) {
+const THEMES = ['rose', 'verdant']
+
+function readStorage(key, fallback) {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(key) || '[]')
-    return Array.isArray(stored) ? stored.filter(isPlayableTrack).map(normalizeTrack) : []
+    const raw = window.localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : fallback
   } catch {
-    window.localStorage.removeItem(key)
-    return []
+    return fallback
   }
 }
 
-function readStoredPlaylists() {
+function writeStorage(key, value) {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(PLAYLISTS_STORAGE_KEY) || '[]')
-    return Array.isArray(stored) ? stored.filter((playlist) => playlist?.id && typeof playlist.name === 'string').map((playlist) => {
-      const tracks = (Array.isArray(playlist.songs) ? playlist.songs : Array.isArray(playlist.tracks) ? playlist.tracks : []).filter(isPlayableTrack).map(normalizeTrack)
-      return { ...playlist, name: playlist.name.trim().slice(0, 60), songs: tracks, tracks }
-    }).filter((playlist) => playlist.name) : []
-  } catch { window.localStorage.removeItem(PLAYLISTS_STORAGE_KEY); return [] }
-}
-
-function readStoredSearches() {
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(SEARCHES_STORAGE_KEY) || '[]')
-    return Array.isArray(stored) ? stored.filter((search) => typeof search === 'string' && search.trim()).slice(0, 8) : []
-  } catch { window.localStorage.removeItem(SEARCHES_STORAGE_KEY); return [] }
-}
-
-function readStoredActiveView() {
-  try {
-    const view = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY)
-    return ['home', 'explore', 'library'].includes(view) ? view : 'home'
+    window.localStorage.setItem(key, JSON.stringify(value))
   } catch {
-    window.localStorage.removeItem(ACTIVE_VIEW_STORAGE_KEY)
-    return 'home'
+    // Local persistence is optional.
   }
 }
 
-function readStoredPlayback() {
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(PLAYBACK_STORAGE_KEY) || '{}')
-    let queue = (Array.isArray(stored.queue) ? stored.queue : readStoredTracks(QUEUE_STORAGE_KEY)).filter(isPlayableTrack).map(normalizeTrack)
-    const currentTrack = isPlayableTrack(stored.currentTrack) ? normalizeTrack(stored.currentTrack) : null
-    if (currentTrack && !queue.some((track) => track.videoId === currentTrack.videoId)) queue = [currentTrack, ...queue]
-    const currentQueueIndex = currentTrack ? Math.max(0, queue.findIndex((track) => track.videoId === currentTrack.videoId)) : -1
-    return {
-      currentTrack,
-      isPlaying: false,
-      currentTime: Number.isFinite(stored.currentTime) ? Math.max(0, stored.currentTime) : 0,
-      duration: 0,
-      queue,
-      currentQueueIndex: currentQueueIndex >= 0 ? currentQueueIndex : (currentTrack ? 0 : -1),
-      playerVisible: Boolean(currentTrack),
-      pipVisible: stored.pipVisible !== false,
-      pipPosition: stored.pipPosition || null,
-      isLoading: false,
-      error: '',
-    }
-  } catch {
-    window.localStorage.removeItem(PLAYBACK_STORAGE_KEY)
-    return { currentTrack: null, isPlaying: false, currentTime: 0, duration: 0, queue: [], currentQueueIndex: -1, playerVisible: false, pipVisible: true, pipPosition: null, isLoading: false, error: '' }
-  }
-}
-
-function isPlayableTrack(track) {
-  return Boolean(track?.videoId && track.title && track.artist)
+function isTrack(track) {
+  return Boolean(track?.videoId && track?.title)
 }
 
 function normalizeTrack(track) {
-  return { ...track, videoId: String(track.videoId), title: String(track.title), artist: String(track.artist || 'YouTube channel'), thumbnail: typeof track.thumbnail === 'string' ? track.thumbnail : '', duration: typeof track.duration === 'string' ? track.duration : '' }
+  return {
+    videoId: String(track.videoId),
+    title: String(track.title),
+    artist: String(track.artist || 'YouTube'),
+    thumbnail: typeof track.thumbnail === 'string' ? track.thumbnail : '',
+    duration: typeof track.duration === 'string' ? track.duration : '',
+  }
+}
+
+function cleanTracks(value) {
+  return Array.isArray(value) ? value.filter(isTrack).map(normalizeTrack) : []
+}
+
+function uniqueTracks(tracks) {
+  return [...new Map(cleanTracks(tracks).map((track) => [track.videoId, track])).values()]
+}
+
+function initialPlayback() {
+  const stored = readStorage(STORAGE.playback, {})
+  const currentTrack = isTrack(stored.currentTrack) ? normalizeTrack(stored.currentTrack) : null
+  const storedQueue = cleanTracks(stored.queue)
+  const queue = currentTrack && !storedQueue.some((track) => track.videoId === currentTrack.videoId)
+    ? [currentTrack, ...storedQueue]
+    : storedQueue
+
+  return {
+    currentTrack,
+    queue,
+    currentQueueIndex: currentTrack
+      ? Math.max(0, queue.findIndex((track) => track.videoId === currentTrack.videoId))
+      : -1,
+    isPlaying: false,
+    currentTime: Number.isFinite(stored.currentTime) ? Math.max(0, stored.currentTime) : 0,
+    duration: 0,
+    pipVisible: Boolean(currentTrack),
+    pipPosition: stored.pipPosition || null,
+    isLoading: false,
+    error: '',
+    seekRequest: null,
+  }
 }
 
 function App() {
-  const [activeView, setActiveView] = useState(readStoredActiveView)
-  const [playback, setPlayback] = useState(readStoredPlayback)
-  const [playRequest, setPlayRequest] = useState(null)
-  const [recentTracks, setRecentTracks] = useState(() => readStoredTracks(RECENT_STORAGE_KEY).slice(0, 20))
-  const [likedTracks, setLikedTracks] = useState(() => {
-    const savedTracks = readStoredTracks(LIKED_STORAGE_KEY)
-    return savedTracks.length ? savedTracks : readStoredTracks(LEGACY_LIKED_STORAGE_KEY)
+  const [view, setView] = useState('home')
+  const [theme, setTheme] = useState(() => {
+    const stored = readStorage(STORAGE.theme, 'rose')
+    return THEMES.includes(stored) ? stored : 'rose'
   })
-  const [playlists, setPlaylists] = useState(readStoredPlaylists)
+  const [playback, setPlayback] = useState(initialPlayback)
+  const [likedTracks, setLikedTracks] = useState(() => cleanTracks(readStorage(STORAGE.liked, [])))
+  const [recentTracks, setRecentTracks] = useState(() => cleanTracks(readStorage(STORAGE.recent, [])))
+  const [playlists, setPlaylists] = useState(() => {
+    const stored = readStorage(STORAGE.playlists, [])
+    return Array.isArray(stored)
+      ? stored
+        .map((playlist) => {
+          const tracks = cleanTracks(Array.isArray(playlist?.songs) ? playlist.songs : playlist?.tracks)
+          return {
+            ...playlist,
+            id: String(playlist?.id || ''),
+            name: String(playlist?.name || '').trim().slice(0, 60),
+            description: String(playlist?.description || ''),
+            coverImage: String(playlist?.coverImage || ''),
+            songs: tracks,
+            tracks,
+          }
+        })
+        .filter((playlist) => playlist.id && playlist.name)
+      : []
+  })
+  const [searches, setSearches] = useState(() => {
+    const stored = readStorage(STORAGE.searches, [])
+    return Array.isArray(stored)
+      ? stored.filter((item) => typeof item === 'string' && item.trim()).slice(0, 8)
+      : []
+  })
+  const [search, setSearch] = useState({
+    query: '',
+    submittedQuery: '',
+    results: [],
+    loading: false,
+    error: '',
+  })
   const [playlistPickerTrack, setPlaylistPickerTrack] = useState(null)
-  const [searchState, setSearchState] = useState({ query: '', submittedQuery: '', results: [], isLoading: false, error: '', requestId: 0, mood: '' })
-  const [recentSearches, setRecentSearches] = useState(readStoredSearches)
-  const [isConnectOpen, setIsConnectOpen] = useState(false)
+  const [connectOpen, setConnectOpen] = useState(false)
   const [connectRoom, setConnectRoom] = useState(null)
+  const [connectStatus, setConnectStatus] = useState('idle')
   const [connectError, setConnectError] = useState('')
-  const connectRemoteSignatureRef = useRef(null)
-  const connectRevisionRef = useRef(0)
-  const connectSyncRequestedRef = useRef(false)
+  const [chatMessages, setChatMessages] = useState([])
+
   const playbackRef = useRef(playback)
-  const { currentTrack, queue, currentQueueIndex } = playback
-  useEffect(() => { playbackRef.current = playback }, [playback])
-
-  useEffect(() => { window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(recentTracks.slice(0, 20))) }, [recentTracks])
-  useEffect(() => { window.localStorage.setItem(LIKED_STORAGE_KEY, JSON.stringify(likedTracks)) }, [likedTracks])
-  useEffect(() => {
-    window.localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(queue.filter(isPlayableTrack)))
-    window.localStorage.setItem(PLAYBACK_STORAGE_KEY, JSON.stringify({ ...playback, isPlaying: false, duration: 0, isLoading: false, error: '' }))
-  }, [playback, queue])
-  useEffect(() => { window.localStorage.setItem(PLAYLISTS_STORAGE_KEY, JSON.stringify(playlists)) }, [playlists])
-  useEffect(() => { window.localStorage.setItem(SEARCHES_STORAGE_KEY, JSON.stringify(recentSearches.slice(0, 8))) }, [recentSearches])
-  useEffect(() => { window.localStorage.setItem(ACTIVE_VIEW_STORAGE_KEY, activeView) }, [activeView])
+  const roomVersionRef = useRef(0)
+  const seekIdRef = useRef('')
 
   useEffect(() => {
-  if (!connectRoom?.roomCode) return undefined
+    playbackRef.current = playback
+  }, [playback])
 
-  let active = true
-  let unsubscribeRoom
-  let unsubscribePresence
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    writeStorage(STORAGE.theme, theme)
+  }, [theme])
 
-  connectRevisionRef.current = 0
+  useEffect(() => writeStorage(STORAGE.liked, likedTracks), [likedTracks])
+  useEffect(() => writeStorage(STORAGE.recent, recentTracks.slice(0, 20)), [recentTracks])
+  useEffect(() => writeStorage(STORAGE.playlists, playlists), [playlists])
+  useEffect(() => writeStorage(STORAGE.searches, searches.slice(0, 8)), [searches])
+  useEffect(() => {
+    writeStorage(STORAGE.playback, {
+      currentTrack: playback.currentTrack,
+      queue: playback.queue,
+      currentTime: playback.currentTime,
+      pipPosition: playback.pipPosition,
+    })
+  }, [playback])
 
-  try {
-    unsubscribeRoom = subscribeToRoom(connectRoom.roomCode, (roomData) => {
-      if (roomData?.type === 'error') {
-        setConnectError(roomData.message || connectConfigMessage)
+  useEffect(() => subscribeToConnection((message) => {
+    if (message.state) setConnectStatus(message.state)
+  }), [])
+
+  useEffect(() => {
+    if (!connectRoom?.roomCode) return undefined
+
+    roomVersionRef.current = 0
+    seekIdRef.current = ''
+    setChatMessages([])
+    setConnectError('')
+
+    return subscribeToRoom(connectRoom.roomCode, (message) => {
+      if (message.type === 'error') {
+        setConnectError(message.message || connectConfigMessage)
         return
       }
 
-      if (!active || !roomData) return
-
-      const syncVersion = Number(roomData.syncVersion) || 0
-
-      if (syncVersion && syncVersion <= connectRevisionRef.current) {
+      if (message.type === 'presence-state') {
+        setConnectRoom((room) => room
+          ? { ...room, participantCount: Math.max(1, Number(message.participantCount) || 1) }
+          : room)
         return
       }
 
-      if (syncVersion) {
-        connectRevisionRef.current = syncVersion
+      if (message.type === 'chat-message') {
+        setChatMessages((current) => [...current, message.message].slice(-50))
+        return
       }
 
-      const nextTrack = isPlayableTrack(roomData.activeVideoMetadata)
-        ? normalizeTrack(roomData.activeVideoMetadata)
-        : null
-
-      const remoteIsPlaying = Boolean(roomData.isPlaying)
-
-      const playbackPosition = Number(roomData.playbackPosition)
-      const seekPosition = Number(roomData.seekPosition)
-
-      const basePosition =
-        Number.isFinite(seekPosition) && seekPosition >= 0
-          ? seekPosition
-          : Number.isFinite(playbackPosition)
-            ? Math.max(0, playbackPosition)
-            : 0
-
-      const updatedAt = Number(roomData.updatedAt) || Date.now()
-
-      const remoteCurrentTime = remoteIsPlaying
-        ? basePosition + Math.max(0, (Date.now() - updatedAt) / 1000)
-        : basePosition
-
-      const remoteQueue = Array.isArray(roomData.queue)
-        ? roomData.queue
-            .filter(isPlayableTrack)
-            .map(normalizeTrack)
-        : []
-
-      /*
-       * Every server state update represents a new authoritative
-       * playback position. The receiving player should apply that
-       * position exactly once.
-       */
-      const remoteSyncToken = `room-${syncVersion || updatedAt}`
-
-      connectRemoteSignatureRef.current = JSON.stringify({
-        track: nextTrack?.videoId || null,
-        isPlaying: remoteIsPlaying,
-        queue: remoteQueue.map((track) => track.videoId),
-        syncToken: remoteSyncToken,
-      })
-
-      setPlayback((current) => {
-        const sameTrack =
-          current.currentTrack?.videoId === nextTrack?.videoId
-
-        return {
-          ...current,
-          currentTrack: nextTrack,
-          queue: remoteQueue,
-          currentQueueIndex: nextTrack
-            ? Math.max(
-                0,
-                remoteQueue.findIndex(
-                  (track) => track.videoId === nextTrack.videoId
-                )
-              )
-            : -1,
-          isPlaying: remoteIsPlaying,
-          currentTime: remoteCurrentTime,
-          seekRequest: nextTrack
-            ? {
-                videoId: nextTrack.videoId,
-                time: remoteCurrentTime,
-                token: remoteSyncToken,
-                remote: true,
-              }
-            : null,
-          duration: sameTrack ? current.duration : 0,
-          playerVisible: Boolean(nextTrack),
-          isLoading: false,
-          error: '',
-        }
-      })
-
-      if (nextTrack) {
-        const currentVideoId =
-          playbackRef.current.currentTrack?.videoId || ''
-
-        if (nextTrack.videoId !== currentVideoId) {
-          setPlayRequest({
-            videoId: nextTrack.videoId,
-            token: Date.now(),
-            autoplay: remoteIsPlaying,
-          })
-        } else {
-          /*
-           * Same song: the player already exists.
-           * isPlaying + seekRequest will control it.
-           */
-          setPlayRequest(null)
-        }
-      } else {
-        setPlayRequest(null)
-      }
-    })
-
-    unsubscribePresence = subscribeToPresence(
-      connectRoom.roomCode,
-      (presence) => {
-        if (active) {
-          setConnectRoom((current) =>
-            current ? { ...current, ...presence } : current
-          )
-        }
-      }
-    )
-  } catch (error) {
-    window.setTimeout(() => {
-      if (!active) return
-
-      setConnectError(
-        error.code === 'CONNECT_NOT_CONFIGURED'
-          ? connectConfigMessage
-          : 'Connect could not start.'
-      )
-    }, 0)
-  }
-
-  return () => {
-    active = false
-    unsubscribeRoom?.()
-    unsubscribePresence?.()
-  }
-}, [connectRoom?.roomCode])
-
-  useEffect(() => {
-  if (!connectRoom?.roomCode) return undefined
-  if (!connectSyncRequestedRef.current) return undefined
-
-  connectSyncRequestedRef.current = false
-
-  const timer = window.setTimeout(() => {
-    const outgoingPlayback = playbackRef.current
-
-    updatePlaybackState(connectRoom.roomCode, outgoingPlayback)
-      .catch(() => {
-        setConnectError('Connect lost its network connection.')
-      })
-  }, 80)
-
-  return () => window.clearTimeout(timer)
-}, [
-  connectRoom?.roomCode,
-  playback.currentTrack?.videoId,
-  playback.isPlaying,
-  playback.seekRequest?.token,
-  ])
-
-  useEffect(() => {
-    if (!searchState.submittedQuery && !searchState.mood) return undefined
-    const controller = new AbortController()
-    const request = searchState.mood ? searchMood(searchState.mood, controller.signal) : searchYouTube(searchState.submittedQuery, controller.signal)
-    request
-      .then((results) => setSearchState((current) => current.submittedQuery === searchState.submittedQuery && current.mood === searchState.mood ? { ...current, results, isLoading: false, error: '' } : current))
-      .catch((requestError) => {
-        if (requestError.name !== 'AbortError') setSearchState((current) => current.submittedQuery === searchState.submittedQuery && current.mood === searchState.mood ? { ...current, isLoading: false, error: requestError.code === 'YOUTUBE_NOT_CONFIGURED' ? requestError.message : 'We could not reach YouTube right now.' } : current)
-      })
-    return () => controller.abort()
-  }, [searchState.submittedQuery, searchState.requestId, searchState.mood])
-
-  const selectTrack = (track, shouldPlay = false, nextQueue = null) => {
-    if (!isPlayableTrack(track)) return
-    const selectedTrack = normalizeTrack(track)
-    setPlayback((current) => {
-      const sourceQueue = nextQueue || current.queue
-      const trackQueue = sourceQueue.some((candidate) => candidate.videoId === selectedTrack.videoId) ? sourceQueue : [...sourceQueue, selectedTrack]
-      const trackIndex = trackQueue.findIndex((candidate) => candidate.videoId === selectedTrack.videoId)
-      return { ...current, currentTrack: selectedTrack, queue: trackQueue, currentQueueIndex: trackIndex, currentTime: 0, duration: 0, isPlaying: false, playerVisible: true, pipVisible: current.pipVisible, isLoading: shouldPlay, error: '' }
-    })
-    setPlayRequest(shouldPlay ? { videoId: selectedTrack.videoId, token: Date.now() } : null)
-  }
-
-  const selectYouTubeResult = (result, shouldPlay = false, resultQueue = null) => {
-    selectTrack(result, shouldPlay, resultQueue)
-    setActiveView('home')
-  }
-
-  const addToQueue = (track) => {
-    if (!isPlayableTrack(track)) return
-    const queuedTrack = normalizeTrack(track)
-    setPlayback((current) => current.queue.some((candidate) => candidate.videoId === queuedTrack.videoId) ? current : { ...current, queue: [...current.queue, queuedTrack], currentQueueIndex: current.currentTrack ? current.currentQueueIndex : 0 })
-  }
-
-  const playNext = (track) => {
-    if (!isPlayableTrack(track)) return
-    const queuedTrack = normalizeTrack(track)
-    setPlayback((current) => {
-      if (current.queue.some((candidate) => candidate.videoId === queuedTrack.videoId)) return current
-      const insertAt = current.currentTrack ? Math.max(0, current.currentQueueIndex + 1) : current.queue.length
-      return { ...current, queue: [...current.queue.slice(0, insertAt), queuedTrack, ...current.queue.slice(insertAt)] }
-    })
-  }
-
-  const removeFromQueue = (videoId) => {
-    const removedIndex = queue.findIndex((track) => track.videoId === videoId)
-    if (removedIndex < 0) return
-    setPlayback((current) => {
-      const nextQueue = current.queue.filter((track) => track.videoId !== videoId)
-      const nextIndex = removedIndex < current.currentQueueIndex ? current.currentQueueIndex - 1 : current.currentQueueIndex
-      return { ...current, queue: nextQueue, currentQueueIndex: current.currentTrack?.videoId === videoId ? Math.min(nextIndex, nextQueue.length - 1) : nextIndex }
-    })
-  }
-
-  const clearQueue = () => {
-    setPlayback((current) => ({ ...current, queue: current.currentTrack ? [current.currentTrack] : [], currentQueueIndex: current.currentTrack ? 0 : -1 }))
-  }
-
-
-
-  const updatePlayback = (changes, options = {}) => {
-    if (options.sync !== false) {
-      connectSyncRequestedRef.current = true
-    }
-
-    setPlayback((current) => ({
-      ...current,
-      ...changes,
-    }))
-  }
-
-  const toggleLike = (track) => {
-    if (!isPlayableTrack(track)) return
-    const savedTrack = { ...normalizeTrack(track), savedAt: new Date().toISOString() }
-    setLikedTracks((currentLiked) => currentLiked.some((likedTrack) => likedTrack.videoId === track.videoId)
-      ? currentLiked.filter((likedTrack) => likedTrack.videoId !== track.videoId)
-      : [...currentLiked, savedTrack])
-  }
-
-  const handleTrackStarted = (track) => {
-    if (!isPlayableTrack(track)) return
-    const recentTrack = { videoId: track.videoId, title: track.title, artist: track.artist, thumbnail: track.thumbnail || '', duration: track.duration || '', lastPlayedAt: new Date().toISOString() }
-    setRecentTracks((currentRecent) => [recentTrack, ...currentRecent.filter((item) => item.videoId !== track.videoId)].slice(0, 20))
-  }
-
-  const removeRecentTrack = (videoId) => setRecentTracks((currentRecent) => currentRecent.filter((track) => track.videoId !== videoId))
-
-  const createPlaylist = (details) => {
-    const now = Date.now()
-    const playlist = { id: `playlist-${now}-${Math.random().toString(36).slice(2, 8)}`, name: details.name.trim().slice(0, 60), description: details.description?.trim() || '', songs: [], tracks: [], createdAt: now, updatedAt: now }
-    setPlaylists((current) => [...current, playlist])
-    return playlist
-  }
-  const updatePlaylist = (id, details) => setPlaylists((current) => current.map((playlist) => playlist.id === id ? { ...playlist, ...details, updatedAt: Date.now() } : playlist))
-  const deletePlaylist = (id) => { if (window.confirm('Delete this playlist? Your liked and recent songs will stay safe.')) setPlaylists((current) => current.filter((playlist) => playlist.id !== id)) }
-  const addToPlaylist = (playlistId, track) => {
-    if (!isPlayableTrack(track)) return false
-    let added = false
-    setPlaylists((current) => current.map((playlist) => {
-      if (playlist.id !== playlistId || playlist.songs.some((item) => item.videoId === track.videoId)) return playlist
-      added = true
-      const song = { videoId: track.videoId, title: track.title, artist: track.artist, thumbnail: track.thumbnail || '', duration: track.duration || '' }
-      return { ...playlist, songs: [...playlist.songs, song], tracks: [...playlist.songs, song], updatedAt: Date.now() }
-    }))
-    return added
-  }
-  const removeFromPlaylist = (playlistId, videoId) => setPlaylists((current) => current.map((playlist) => playlist.id === playlistId ? { ...playlist, songs: playlist.songs.filter((track) => track.videoId !== videoId), tracks: playlist.songs.filter((track) => track.videoId !== videoId), updatedAt: Date.now() } : playlist))
-  const playPlaylist = (tracks, shuffle = false) => {
-    if (!tracks?.length) return
-    const ordered = shuffle ? [...tracks].sort(() => Math.random() - 0.5) : tracks
-    selectTrack(ordered[0], true, ordered)
-    setActiveView('home')
-  }
-
-  const updateSearchQuery = (query) => setSearchState((current) => ({ ...current, query }))
-  const submitSearch = (nextQuery) => {
-    const trimmedQuery = nextQuery.trim()
-    if (trimmedQuery.length < 2 || (searchState.isLoading && searchState.submittedQuery === trimmedQuery)) return
-    setRecentSearches((current) => [trimmedQuery, ...current.filter((search) => search.toLowerCase() !== trimmedQuery.toLowerCase())].slice(0, 8))
-    setSearchState((current) => ({ ...current, query: trimmedQuery, submittedQuery: trimmedQuery, mood: '', isLoading: true, error: '', requestId: current.requestId + 1 }))
-    setActiveView('explore')
-  }
-  const submitMoodSearch = (mood) => {
-    setSearchState((current) => ({ ...current, query: '', submittedQuery: '', mood, isLoading: true, error: '', requestId: current.requestId + 1 }))
-    setActiveView('explore')
-  }
-  const clearSearch = () => setSearchState((current) => ({ ...current, query: '', submittedQuery: '', mood: '', isLoading: false, error: '' }))
-
-  const handleCreateRoom = async () => {
-    setConnectError('')
-    try {
-      const created = await createRoom(playback)
-      setConnectRoom({ ...created, participantCount: 1 })
-    } catch (error) { setConnectError(error.code === 'CONNECT_NOT_CONFIGURED' ? connectConfigMessage : 'Could not create a room. Check your connection and try again.') }
-  }
-
-  const handleJoinRoom = async (roomCode) => {
-    setConnectError('')
-    try {
-      const joined = await joinRoom(roomCode)
-      setConnectRoom({ ...joined, participantCount: 1 })
-    } catch (error) { setConnectError(error.message || 'Could not join that room.') }
-  }
-
-  const handleLeaveRoom = async () => {
-    const roomCode = connectRoom?.roomCode
-    setConnectRoom(null)
-    if (roomCode) await leaveRoom(roomCode).catch(() => {})
-  }
-
-  return <div className="app-shell">
-    <button type="button" className="connect-entry" aria-label="Open Connect" onClick={() => { setConnectError(''); setIsConnectOpen(true) }}><UserRound size={16} /><span>Connect</span></button>
-    <aside className="sidebar">
-      <div className="brand"><span className="brand-mark">k</span><span>Krovi</span></div>
-      <nav className="side-nav" aria-label="Main navigation">
-        <button className={activeView === 'home' ? 'active' : ''} onClick={() => setActiveView('home')}><Home size={19} /> Home</button><button className={activeView === 'explore' ? 'active' : ''} onClick={() => {
-          setSearchState((current) => ({
+      if (message.type === 'queue-state') {
+        const version = Number(message.version) || 0
+        if (version && version <= roomVersionRef.current) return
+        if (version) roomVersionRef.current = version
+        setPlayback((current) => {
+          const queue = cleanTracks(message.queue)
+          return {
             ...current,
-            submittedQuery: '',
-            mood: '',
-            results: [],
-            isLoading: false,
-            error: '',
-          }))
-          setActiveView('explore')
-        }}><Compass size={19} /> Explore</button><button className={activeView === 'library' ? 'active' : ''} onClick={() => setActiveView('library')}><Library size={19} /> Library</button>
-      </nav>
-      <div className="sidebar-note"><span>Keep a little room<br /><strong>for discovery.</strong></span><span className="note-spark">✦</span></div>
-      <button className="profile-link" type="button"><UserRound size={18} /><span>Profile</span><ChevronRight size={15} /></button>
-    </aside>
+            queue,
+            currentQueueIndex: current.currentTrack
+              ? Math.max(0, queue.findIndex((track) => track.videoId === current.currentTrack.videoId))
+              : -1,
+          }
+        })
+        return
+      }
 
-    <main className="main-content">
-      {activeView === 'home' ? <PersonalizedHome recentTracks={recentTracks} likedTracks={likedTracks} playlists={playlists} recentSearches={recentSearches} onPlay={(track) => selectTrack(track, true)} onPlayAll={playPlaylist} onOpenLibrary={(tab) => { setActiveView('library'); void tab }} onOpenExplore={() => setActiveView('explore')} onSearchCategory={submitSearch} onRetryRecommendations={() => setActiveView('home')} /> : activeView === 'explore' ? <Explore query={searchState.query} submittedQuery={searchState.submittedQuery} mood={searchState.mood} results={searchState.results} isLoading={searchState.isLoading} error={searchState.error} recentSearches={recentSearches} onQueryChange={updateSearchQuery} onSubmitSearch={submitSearch} onSubmitMood={submitMoodSearch} onClearSearch={clearSearch} onClearRecentSearches={() => setRecentSearches([])} onSelectResult={selectYouTubeResult} onAddToQueue={addToQueue} onPlayNext={playNext} likedTracks={likedTracks} onToggleLike={toggleLike} onRequestPlaylist={setPlaylistPickerTrack} onBack={() => setActiveView('home')} /> : activeView === 'library' ? <Playlists playlists={playlists} savedTracks={likedTracks} recentTracks={recentTracks} availableTracks={[...likedTracks, ...recentTracks, ...queue].filter((track, index, all) => all.findIndex((item) => item.videoId === track.videoId) === index)} onCreate={createPlaylist} onUpdate={updatePlaylist} onDelete={deletePlaylist} onPlayTrack={(track, trackQueue) => selectTrack(track, true, trackQueue)} onPlayAll={playPlaylist} onAddTrack={addToPlaylist} onRemoveTrack={removeFromPlaylist} onAddToQueue={addToQueue} onPlayNext={playNext} onToggleLike={toggleLike} onRemoveRecent={removeRecentTrack} onExplore={() => setActiveView('explore')} onRequestPicker={setPlaylistPickerTrack} /> : null}
-    </main>
-    <nav className="bottom-nav" aria-label="Mobile navigation"><button className={activeView === 'home' ? 'active' : ''} onClick={() => setActiveView('home')}><Home size={19} /><span>Home</span></button><button className={activeView === 'explore' ? 'active' : ''} onClick={() => {
-      setSearchState((current) => ({
+      if (message.type !== 'room-state' && message.type !== 'playback-state') return
+
+      const version = Number(message.version) || 0
+      if (version && version <= roomVersionRef.current) return
+      if (version) roomVersionRef.current = version
+
+      if (message.type === 'room-state' && Array.isArray(message.chatMessages)) {
+        setChatMessages(message.chatMessages.slice(-50))
+      }
+
+      const nextTrack = isTrack(message.activeVideoMetadata)
+        ? normalizeTrack(message.activeVideoMetadata)
+        : null
+      const remoteQueue = message.type === 'room-state'
+        ? cleanTracks(message.queue)
+        : playbackRef.current.queue
+      const remotePlaying = Boolean(message.isPlaying)
+      const position = Math.max(0, Number(message.playbackPosition) || 0)
+      const updatedAt = Number(message.updatedAt) || Date.now()
+      const currentTime = remotePlaying
+        ? position + Math.max(0, (Date.now() - updatedAt) / 1000)
+        : position
+      const remoteSeekId = typeof message.seekId === 'string' ? message.seekId : ''
+      const shouldSeek = Boolean(remoteSeekId && remoteSeekId !== seekIdRef.current && nextTrack)
+      if (remoteSeekId) seekIdRef.current = remoteSeekId
+      const sameTrack = playbackRef.current.currentTrack?.videoId === nextTrack?.videoId
+
+      setPlayback((current) => ({
         ...current,
-        submittedQuery: '',
-        mood: '',
-        results: [],
+        currentTrack: nextTrack,
+        queue: remoteQueue,
+        currentQueueIndex: nextTrack
+          ? Math.max(0, remoteQueue.findIndex((track) => track.videoId === nextTrack.videoId))
+          : -1,
+        isPlaying: remotePlaying,
+        currentTime,
+        duration: sameTrack ? current.duration : 0,
+        pipVisible: Boolean(nextTrack),
         isLoading: false,
         error: '',
+        seekRequest: shouldSeek && ['track', 'seek'].includes(message.command)
+          ? {
+              videoId: nextTrack.videoId,
+              time: Number.isFinite(Number(message.seekPosition))
+                ? Math.max(0, Number(message.seekPosition))
+                : currentTime,
+              token: remoteSeekId,
+              remote: true,
+            }
+          : null,
       }))
-      setActiveView('explore')
-    }}><Compass size={19} /><span>Explore</span></button><button className={activeView === 'library' ? 'active' : ''} onClick={() => setActiveView('library')}><Library size={19} /><span>Library</span></button><button><UserRound size={19} /><span>Profile</span></button></nav>
-    <Player playback={playback} currentTrack={currentTrack} queue={queue} currentQueueIndex={currentQueueIndex} playRequest={playRequest} onPlaybackChange={updatePlayback} onSelectTrack={selectTrack} onTrackStarted={handleTrackStarted} likedTracks={likedTracks} onToggleLike={toggleLike} onRequestPlaylist={setPlaylistPickerTrack} onRemoveFromQueue={removeFromQueue} onClearQueue={clearQueue} />
-    <PlaylistPicker track={playlistPickerTrack} playlists={playlists} onAdd={addToPlaylist} onCreate={createPlaylist} onClose={() => setPlaylistPickerTrack(null)} />
-    {isConnectOpen && <Connect room={connectRoom} isConfigured={isConnectConfigured} error={connectError} onCreate={handleCreateRoom} onJoin={handleJoinRoom} onLeave={handleLeaveRoom} onClose={() => setIsConnectOpen(false)} />}
-  </div>
+    })
+  }, [connectRoom?.roomCode])
+
+  const commitPlayback = useCallback((changes, options = {}) => {
+    const next = {
+      ...playbackRef.current,
+      ...changes,
+      seekRequest: changes.seekRequest || null,
+    }
+
+    playbackRef.current = next
+    setPlayback(next)
+
+    if (options.sync && connectRoom?.roomCode) {
+      updatePlaybackState(connectRoom.roomCode, next, {
+        command: options.command || 'playback',
+        seekPosition: options.seekPosition,
+      }).catch(() => setConnectError('Connect lost its network connection.'))
+    }
+  }, [connectRoom?.roomCode])
+
+  const commitQueue = useCallback((queue) => {
+    const cleaned = cleanTracks(queue)
+    const current = playbackRef.current
+    const next = {
+      ...current,
+      queue: cleaned,
+      currentQueueIndex: current.currentTrack
+        ? Math.max(0, cleaned.findIndex((track) => track.videoId === current.currentTrack.videoId))
+        : -1,
+    }
+
+    playbackRef.current = next
+    setPlayback(next)
+
+    if (connectRoom?.roomCode) {
+      updateQueue(connectRoom.roomCode, cleaned)
+        .catch(() => setConnectError('Queue could not be shared with the room.'))
+    }
+  }, [connectRoom?.roomCode])
+
+  const selectTrack = useCallback((track, shouldPlay = false, nextQueue = null) => {
+    if (!isTrack(track)) return
+    const selected = normalizeTrack(track)
+    const sourceQueue = nextQueue ? cleanTracks(nextQueue) : playbackRef.current.queue
+    const queue = sourceQueue.some((item) => item.videoId === selected.videoId)
+      ? sourceQueue
+      : [selected, ...sourceQueue]
+
+    commitPlayback({
+      currentTrack: selected,
+      queue,
+      currentQueueIndex: queue.findIndex((item) => item.videoId === selected.videoId),
+      currentTime: 0,
+      duration: 0,
+      isPlaying: shouldPlay,
+      isLoading: shouldPlay,
+      pipVisible: true,
+      error: '',
+      seekRequest: null,
+    }, {
+      sync: Boolean(connectRoom?.roomCode),
+      command: 'track',
+      seekPosition: 0,
+    })
+  }, [commitPlayback, connectRoom?.roomCode])
+
+  const rememberPlayed = useCallback((track) => {
+    if (!isTrack(track)) return
+    const normalized = normalizeTrack(track)
+    setRecentTracks((current) => [
+      normalized,
+      ...current.filter((item) => item.videoId !== normalized.videoId),
+    ].slice(0, 20))
+  }, [])
+
+  const toggleLike = useCallback((track) => {
+    if (!isTrack(track)) return
+    const normalized = normalizeTrack(track)
+    setLikedTracks((current) => current.some((item) => item.videoId === normalized.videoId)
+      ? current.filter((item) => item.videoId !== normalized.videoId)
+      : [normalized, ...current])
+  }, [])
+
+  const addToQueue = useCallback((track) => {
+    if (!isTrack(track)) return
+    const queue = playbackRef.current.queue
+    if (queue.some((item) => item.videoId === track.videoId)) return
+    commitQueue([...queue, normalizeTrack(track)])
+  }, [commitQueue])
+
+  const playNext = useCallback((track) => {
+    if (!isTrack(track)) return
+    const current = playbackRef.current
+    if (current.queue.some((item) => item.videoId === track.videoId)) return
+    const index = current.currentTrack
+      ? Math.max(0, current.currentQueueIndex + 1)
+      : current.queue.length
+    const queue = [...current.queue]
+    queue.splice(index, 0, normalizeTrack(track))
+    commitQueue(queue)
+  }, [commitQueue])
+
+  const removeFromQueue = useCallback((videoId) => {
+    commitQueue(playbackRef.current.queue.filter((track) => track.videoId !== videoId))
+  }, [commitQueue])
+
+  const clearQueue = useCallback(() => {
+    const current = playbackRef.current
+    commitQueue(current.currentTrack ? [current.currentTrack] : [])
+  }, [commitQueue])
+
+  const playAll = useCallback((tracks, shuffle = false) => {
+    const source = cleanTracks(tracks)
+    if (!source.length) return
+    const queue = shuffle
+      ? [...source].sort(() => Math.random() - 0.5)
+      : source
+    selectTrack(queue[0], true, queue)
+    setView('home')
+  }, [selectTrack])
+
+  const submitSearch = useCallback((value) => {
+    const query = String(value || '').trim()
+    if (query.length < 2) return
+    setSearch((current) => ({
+      ...current,
+      query,
+      submittedQuery: query,
+      results: [],
+      error: '',
+    }))
+    setSearches((current) => [
+      query,
+      ...current.filter((item) => item.toLowerCase() !== query.toLowerCase()),
+    ].slice(0, 8))
+    setView('explore')
+  }, [])
+
+  useEffect(() => {
+    if (!search.submittedQuery) return undefined
+
+    const controller = new AbortController()
+    const query = search.submittedQuery
+    setSearch((current) => ({ ...current, loading: true, error: '' }))
+
+    searchYouTube(query, controller.signal)
+      .then((results) => {
+        if (controller.signal.aborted) return
+        setSearch((current) => current.submittedQuery === query
+          ? { ...current, results, loading: false }
+          : current)
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return
+        setSearch((current) => current.submittedQuery === query
+          ? {
+              ...current,
+              results: [],
+              loading: false,
+              error: error.message || 'Search is unavailable.',
+            }
+          : current)
+      })
+
+    return () => controller.abort()
+  }, [search.submittedQuery])
+
+  const clearSearch = useCallback(() => {
+    setSearch((current) => ({
+      ...current,
+      query: '',
+      submittedQuery: '',
+      results: [],
+      loading: false,
+      error: '',
+    }))
+  }, [])
+
+  const createPlaylist = useCallback((details) => {
+    const timestamp = Date.now()
+    const playlist = {
+      id: 'playlist-' + timestamp + '-' + Math.random().toString(36).slice(2, 7),
+      name: String(details.name || '').trim().slice(0, 60),
+      description: String(details.description || '').trim(),
+      coverImage: String(details.coverImage || '').trim(),
+      songs: [],
+      tracks: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }
+    setPlaylists((current) => [...current, playlist])
+    return playlist
+  }, [])
+
+  const updatePlaylist = useCallback((id, details) => {
+    setPlaylists((current) => current.map((playlist) => {
+      if (playlist.id !== id) return playlist
+      const tracks = cleanTracks(details.songs || details.tracks || playlist.songs)
+      return {
+        ...playlist,
+        ...details,
+        name: String(details.name || playlist.name).trim().slice(0, 60),
+        songs: tracks,
+        tracks,
+        updatedAt: Date.now(),
+      }
+    }))
+  }, [])
+
+  const deletePlaylist = useCallback((id) => {
+    setPlaylists((current) => current.filter((playlist) => playlist.id !== id))
+  }, [])
+
+  const addToPlaylist = useCallback((playlistId, track) => {
+    if (!isTrack(track)) return false
+    const normalized = normalizeTrack(track)
+    const playlist = playlists.find((item) => item.id === playlistId)
+    if (!playlist || playlist.songs.some((item) => item.videoId === normalized.videoId)) return false
+    const songs = [...playlist.songs, normalized]
+    setPlaylists((current) => current.map((item) => item.id === playlistId
+      ? { ...item, songs, tracks: songs, updatedAt: Date.now() }
+      : item))
+    return true
+  }, [playlists])
+
+  const removeFromPlaylist = useCallback((playlistId, videoId) => {
+    setPlaylists((current) => current.map((playlist) => {
+      if (playlist.id !== playlistId) return playlist
+      const tracks = playlist.songs.filter((track) => track.videoId !== videoId)
+      return { ...playlist, songs: tracks, tracks, updatedAt: Date.now() }
+    }))
+  }, [])
+
+  const openConnect = useCallback(() => {
+    setConnectError('')
+    setConnectOpen(true)
+  }, [])
+
+  const handleCreateRoom = useCallback(async () => {
+    setConnectError('')
+    try {
+      const room = await createRoom(playbackRef.current)
+      setConnectRoom(room)
+      setConnectOpen(true)
+    } catch (error) {
+      setConnectError(error.message || connectConfigMessage)
+    }
+  }, [])
+
+  const handleJoinRoom = useCallback(async (roomCode) => {
+    setConnectError('')
+    try {
+      const room = await joinRoom(roomCode)
+      setConnectRoom(room)
+      setConnectOpen(true)
+    } catch (error) {
+      setConnectError(error.message || connectConfigMessage)
+    }
+  }, [])
+
+  const handleLeaveRoom = useCallback(() => {
+    leaveRoom()
+    setConnectRoom(null)
+    setChatMessages([])
+    setConnectStatus('idle')
+    setConnectError('')
+  }, [])
+
+  const handleSendChat = useCallback(async (message) => {
+    if (!connectRoom?.roomCode) return
+    try {
+      await sendChatMessage(connectRoom.roomCode, message)
+    } catch {
+      setConnectError('Message could not be sent.')
+    }
+  }, [connectRoom?.roomCode])
+
+  const availableLibraryTracks = useMemo(() => uniqueTracks([
+    ...likedTracks,
+    ...recentTracks,
+    ...playback.queue,
+  ]), [likedTracks, recentTracks, playback.queue])
+
+  return (
+    <div className="app-shell" data-theme={theme}>
+      <header className="topbar">
+        <button type="button" className="brand-button" onClick={() => setView('home')} aria-label="Krovi home">
+          <span className="brand-mark">k</span>
+          <span className="brand-name">Krovi</span>
+        </button>
+
+        <div className="topbar-actions">
+          <ThemeToggle theme={theme} onToggle={() => setTheme((current) => current === 'rose' ? 'verdant' : 'rose')} />
+          <button type="button" className="connect-button" onClick={openConnect}>
+            <Link2 size={17} />
+            <span>Connect</span>
+            {connectRoom?.participantCount > 1 && <i aria-label="Two listeners connected" />}
+          </button>
+        </div>
+      </header>
+
+      <main className="main-content">
+        {view === 'home' && (
+          <Home
+            recentTracks={recentTracks}
+            likedTracks={likedTracks}
+            playlists={playlists}
+            onSubmitSearch={submitSearch}
+            onOpenExplore={() => setView('explore')}
+            onPlay={(track) => selectTrack(track, true)}
+            onPlayAll={playAll}
+          />
+        )}
+
+        {view === 'explore' && (
+          <Explore
+            query={search.query}
+            submittedQuery={search.submittedQuery}
+            results={search.results}
+            isLoading={search.loading}
+            error={search.error}
+            recentSearches={searches}
+            onQueryChange={(query) => setSearch((current) => ({ ...current, query }))}
+            onSubmitSearch={submitSearch}
+            onClearSearch={clearSearch}
+            onClearRecentSearches={() => setSearches([])}
+            onSelectResult={(track) => selectTrack(track, true, search.results)}
+            onAddToQueue={addToQueue}
+            onPlayNext={playNext}
+            likedTracks={likedTracks}
+            onToggleLike={toggleLike}
+            onRequestPlaylist={setPlaylistPickerTrack}
+            onBack={() => setView('home')}
+          />
+        )}
+
+        {view === 'library' && (
+          <Playlists
+            playlists={playlists}
+            savedTracks={likedTracks}
+            recentTracks={recentTracks}
+            availableTracks={availableLibraryTracks}
+            onCreate={createPlaylist}
+            onUpdate={updatePlaylist}
+            onDelete={deletePlaylist}
+            onPlayTrack={(track, queue) => selectTrack(track, true, queue)}
+            onPlayAll={playAll}
+            onAddTrack={addToPlaylist}
+            onRemoveTrack={removeFromPlaylist}
+            onAddToQueue={addToQueue}
+            onPlayNext={playNext}
+            onToggleLike={toggleLike}
+            onRemoveRecent={(videoId) => setRecentTracks((current) => current.filter((track) => track.videoId !== videoId))}
+            onRequestPlaylist={setPlaylistPickerTrack}
+            onExplore={() => setView('explore')}
+          />
+        )}
+      </main>
+
+      <nav className="bottom-nav" aria-label="Primary navigation">
+        {[
+          ['home', 'Home', HomeIcon],
+          ['explore', 'Explore', Compass],
+          ['library', 'Library', Library],
+        ].map(([key, label, Icon]) => (
+          <button type="button" key={key} className={view === key ? 'active' : ''} onClick={() => setView(key)}>
+            <Icon size={19} />
+            <span>{label}</span>
+          </button>
+        ))}
+        <button type="button" className={connectOpen ? 'active' : ''} onClick={openConnect}>
+          <Link2 size={19} />
+          <span>Connect</span>
+        </button>
+      </nav>
+
+      <Player
+        playback={playback}
+        onPlaybackChange={commitPlayback}
+        onSelectTrack={selectTrack}
+        onTrackStarted={rememberPlayed}
+        likedTracks={likedTracks}
+        onToggleLike={toggleLike}
+        onRequestPlaylist={setPlaylistPickerTrack}
+        onRemoveFromQueue={removeFromQueue}
+        onClearQueue={clearQueue}
+      />
+
+      {playlistPickerTrack && (
+        <PlaylistPicker
+          track={playlistPickerTrack}
+          playlists={playlists}
+          onAdd={addToPlaylist}
+          onCreate={createPlaylist}
+          onClose={() => setPlaylistPickerTrack(null)}
+        />
+      )}
+
+      {connectOpen && (
+        <Connect
+          room={connectRoom}
+          status={connectStatus}
+          error={connectError}
+          chatMessages={chatMessages}
+          onCreate={handleCreateRoom}
+          onJoin={handleJoinRoom}
+          onLeave={handleLeaveRoom}
+          onSendChat={handleSendChat}
+          onClose={() => setConnectOpen(false)}
+        />
+      )}
+    </div>
+  )
 }
 
 export default App
