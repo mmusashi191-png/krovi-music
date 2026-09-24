@@ -365,15 +365,16 @@ websocketServer.on('connection', (socket) => {
     }
   })
 
-  socket.on('close', () => {
+  const cleanupClient = () => {
+    // A reconnect can reuse the same client id. Never let the old socket
+    // remove the room membership or client registry entry of the new socket.
+    if (clients.get(client.clientId) !== client) return
     removeClientFromRoom(client)
     clients.delete(client.clientId)
-  })
+  }
 
-  socket.on('error', () => {
-    removeClientFromRoom(client)
-    clients.delete(client.clientId)
-  })
+  socket.on('close', cleanupClient)
+  socket.on('error', cleanupClient)
 })
 
 const heartbeat = setInterval(() => {
