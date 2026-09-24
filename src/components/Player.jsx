@@ -614,9 +614,8 @@ export default function Player({
     <>
       {expanded && <div className="player-backdrop" aria-hidden="true" />}
 
-      {pipVisible && (
-        <div
-          className={'pip-player ' + (expanded ? 'is-expanded' : '')}
+      <div
+        className={'pip-player ' + (expanded ? 'is-expanded' : '') + (!pipVisible ? ' is-hidden' : '')}
           style={!expanded && pipPosition ? {
             left: pipPosition.x + 'px',
             top: pipPosition.y + 'px',
@@ -762,8 +761,7 @@ export default function Player({
               </div>
             </div>
           )}
-        </div>
-      )}
+      </div>
 
       <aside className={'player-dock ' + (isPlaying ? 'is-playing' : '')}>
         <div className="player-dock-body">
