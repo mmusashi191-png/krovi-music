@@ -102,7 +102,7 @@ public class KroviMediaService extends Service {
 
         if (ACTION_PLAY_PAUSE.equals(action) || ACTION_PREVIOUS.equals(action) || ACTION_NEXT.equals(action)) {
             handleAction(action);
-            return START_STICKY;
+            return START_NOT_STICKY;
         }
 
         playing = true;
