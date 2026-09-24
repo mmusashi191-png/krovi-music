@@ -163,6 +163,7 @@ export default function Player({
   const progressTimerRef = useRef(null)
   const dragRef = useRef(null)
   const dragMovedRef = useRef(false)
+  const dragCleanupRef = useRef(null)
 
   const track = playback.currentTrack
   const isPlaying = playback.isPlaying
@@ -184,6 +185,80 @@ export default function Player({
   useEffect(() => {
     if (!dragRef.current) setPipPosition(playback.pipPosition || null)
   }, [playback.pipPosition])
+
+  const startPipDrag = (event) => {
+    if (expanded || event.button > 0) return
+
+    const target = event.target
+    if (target.closest('button, input, textarea, a')) return
+
+    const dock = event.currentTarget.closest('.player-dock')
+    if (!dock) return
+
+    const rect = dock.getBoundingClientRect()
+    const currentX = pipPosition?.x ?? rect.left
+    const currentY = pipPosition?.y ?? rect.top
+
+    dragMovedRef.current = false
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startPointerX: event.clientX,
+      startPointerY: event.clientY,
+      startX: currentX,
+      startY: currentY,
+      width: rect.width,
+      height: rect.height,
+      position: { x: currentX, y: currentY },
+    }
+
+    const onMove = (moveEvent) => {
+      const drag = dragRef.current
+      if (!drag || moveEvent.pointerId !== drag.pointerId) return
+
+      const deltaX = moveEvent.clientX - drag.startPointerX
+      const deltaY = moveEvent.clientY - drag.startPointerY
+
+      if (Math.hypot(deltaX, deltaY) > 5) {
+        dragMovedRef.current = true
+      }
+
+      const maxX = Math.max(8, window.innerWidth - drag.width - 8)
+      const navReserve = 84
+      const maxY = Math.max(8, window.innerHeight - drag.height - navReserve)
+
+      drag.position = {
+        x: Math.min(maxX, Math.max(8, drag.startX + deltaX)),
+        y: Math.min(maxY, Math.max(8, drag.startY + deltaY)),
+      }
+
+      setPipPosition(drag.position)
+    }
+
+    const onUp = (upEvent) => {
+      const drag = dragRef.current
+      if (!drag || upEvent.pointerId !== drag.pointerId) return
+
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      dragCleanupRef.current = null
+
+      if (dragMovedRef.current) {
+        onPlaybackChange({ pipPosition: drag.position }, { sync: false })
+      }
+
+      dragRef.current = null
+    }
+
+    dragCleanupRef.current = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      dragRef.current = null
+      dragCleanupRef.current = null
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp, { once: true })
+  }
 
   const stopProgress = useCallback(() => {
     if (progressTimerRef.current) window.clearInterval(progressTimerRef.current)
@@ -397,8 +472,7 @@ export default function Player({
 
   useEffect(() => () => {
     stopProgress()
-    window.removeEventListener('pointermove', movePip)
-    dragRef.current = null
+    dragCleanupRef.current?.()
     playerRef.current?.destroy?.()
     playerRef.current = null
   }, [stopProgress])
@@ -425,73 +499,6 @@ export default function Player({
 
   if (!track) return null
 
-
-  const startPipDrag = (event) => {
-    if (expanded || event.button > 0) return
-
-    const target = event.target
-    if (target.closest('button, input, textarea, a')) return
-
-    const dock = event.currentTarget.closest('.player-dock')
-    if (!dock) return
-
-    const rect = dock.getBoundingClientRect()
-    const currentX = pipPosition?.x ?? rect.left
-    const currentY = pipPosition?.y ?? rect.top
-
-    dragMovedRef.current = false
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startPointerX: event.clientX,
-      startPointerY: event.clientY,
-      startX: currentX,
-      startY: currentY,
-      width: rect.width,
-      height: rect.height,
-    }
-
-    event.currentTarget.setPointerCapture?.(event.pointerId)
-    window.addEventListener('pointermove', movePip)
-    window.addEventListener('pointerup', endPipDrag, { once: true })
-  }
-
-  const movePip = (event) => {
-    const drag = dragRef.current
-    if (!drag || event.pointerId !== drag.pointerId) return
-
-    const deltaX = event.clientX - drag.startPointerX
-    const deltaY = event.clientY - drag.startPointerY
-
-    if (Math.hypot(deltaX, deltaY) > 5) {
-      dragMovedRef.current = true
-    }
-
-    const maxX = Math.max(8, window.innerWidth - drag.width - 8)
-    const navReserve = 84
-    const maxY = Math.max(8, window.innerHeight - drag.height - navReserve)
-
-    const nextPosition = {
-      x: Math.min(maxX, Math.max(8, drag.startX + deltaX)),
-      y: Math.min(maxY, Math.max(8, drag.startY + deltaY)),
-    }
-
-    setPipPosition(nextPosition)
-  }
-
-  const endPipDrag = (event) => {
-    const drag = dragRef.current
-    if (!drag || event.pointerId !== drag.pointerId) return
-
-    dragRef.current = null
-    window.removeEventListener('pointermove', movePip)
-
-    if (dragMovedRef.current) {
-      const position = pipPosition
-      if (position) {
-        onPlaybackChange({ pipPosition: position }, { sync: false })
-      }
-    }
-  }
 
   const togglePlayback = () => {
     const player = playerRef.current
