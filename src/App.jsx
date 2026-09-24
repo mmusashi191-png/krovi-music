@@ -31,13 +31,17 @@ const STORAGE = {
 
 const THEMES = ['rose', 'verdant']
 
-function readStorage(key, fallback) {
+function readStorage(key, fallback, legacyKeys = []) {
   try {
-    const raw = window.localStorage.getItem(key)
-    return raw ? JSON.parse(raw) : fallback
+    for (const storageKey of [key, ...legacyKeys]) {
+      const raw = window.localStorage.getItem(storageKey)
+      if (raw == null) continue
+      return JSON.parse(raw)
+    }
   } catch {
     return fallback
   }
+  return fallback
 }
 
 function writeStorage(key, value) {
@@ -71,9 +75,10 @@ function uniqueTracks(tracks) {
 }
 
 function initialPlayback() {
-  const stored = readStorage(STORAGE.playback, {})
+  const stored = readStorage(STORAGE.playback, {}, ['krovi-playback-v1'])
   const currentTrack = isTrack(stored.currentTrack) ? normalizeTrack(stored.currentTrack) : null
-  const storedQueue = cleanTracks(stored.queue)
+  const legacyQueue = readStorage('krovi-queue', [])
+  const storedQueue = uniqueTracks([...cleanTracks(stored.queue), ...cleanTracks(legacyQueue)])
   const queue = currentTrack && !storedQueue.some((track) => track.videoId === currentTrack.videoId)
     ? [currentTrack, ...storedQueue]
     : storedQueue
@@ -102,10 +107,10 @@ function App() {
     return THEMES.includes(stored) ? stored : 'rose'
   })
   const [playback, setPlayback] = useState(initialPlayback)
-  const [likedTracks, setLikedTracks] = useState(() => cleanTracks(readStorage(STORAGE.liked, [])))
-  const [recentTracks, setRecentTracks] = useState(() => cleanTracks(readStorage(STORAGE.recent, [])))
+  const [likedTracks, setLikedTracks] = useState(() => cleanTracks(readStorage(STORAGE.liked, [], ['krovi-library-v1', 'krovi-liked-songs'])))
+  const [recentTracks, setRecentTracks] = useState(() => cleanTracks(readStorage(STORAGE.recent, [], ['krovi-recently-played'])))
   const [playlists, setPlaylists] = useState(() => {
-    const stored = readStorage(STORAGE.playlists, [])
+    const stored = readStorage(STORAGE.playlists, [], ['krovi-playlists-v1'])
     return Array.isArray(stored)
       ? stored
         .map((playlist) => {
@@ -124,7 +129,7 @@ function App() {
       : []
   })
   const [searches, setSearches] = useState(() => {
-    const stored = readStorage(STORAGE.searches, [])
+    const stored = readStorage(STORAGE.searches, [], ['krovi-recent-searches'])
     return Array.isArray(stored)
       ? stored.filter((item) => typeof item === 'string' && item.trim()).slice(0, 8)
       : []
