@@ -1,0 +1,100 @@
+# Krovi Music — Professional Rebuild Checklist
+
+Branch: rebuild/professional-foundation
+Started: 2026-09-24
+
+## Non-negotiable product rules
+- Phone-first. Do not build a separate desktop product.
+- Two professional visual systems:
+  - Rosé — warm pink editorial music direction.
+  - Verdant — darker forest/earth direction.
+- No glassmorphism as the default visual language.
+- No decorative UI with no product purpose.
+- No fake metrics or fake social proof.
+- No dead buttons or placeholder controls.
+- No duplicated state ownership for playback.
+- No YouTube audio extraction or bypassing YouTube playback restrictions.
+- Connect is a two-person room where both participants can control playback.
+- Meaningful animation only: hierarchy, state, navigation, or interaction.
+- Reduced-motion users get a valid reduced-motion experience.
+
+## Architecture target
+App
+- navigation/view state
+- persistent library/recent/playlists
+- authoritative playback state
+- Connect room state
+- search state
+
+Player
+- owns exactly one YouTube IFrame instance
+- translates YouTube events into App playback state
+- never invents a second playback state model
+- never creates duplicate player instances
+- all play/pause/seek/track changes use one command path
+
+Connect service
+- owns one WebSocket connection
+- explicit connection lifecycle
+- room request/response handling
+- room-state, playback, queue, presence and chat are distinct message categories
+- reconnect-safe handling
+- hosted URL comes from build environment
+
+Search
+- one user search = one server request
+- AbortController cancels obsolete searches
+- no render-triggered network effects
+- mood/direction searches use one deliberate query, not request fan-out
+
+UI
+- mobile safe-area aware
+- one spacing/radius/type system
+- one semantic color-token system per theme
+- modal/sheet layers have explicit z-index ownership
+- intentional focus states
+- accessible touch targets
+- no broad selector overrides or duplicate CSS blocks
+
+## Required verification gates
+[ ] Repository cleanup
+[ ] Persistent architecture/checkpoint files
+[ ] Design tokens
+[ ] Rosé theme
+[ ] Verdant theme
+[ ] New mobile app shell
+[ ] New Home
+[ ] New Explore/search
+[ ] New Library/playlists
+[ ] New Connect UI
+[ ] New Player UI
+[ ] Single YouTube player lifecycle
+[ ] Local playback verification
+[ ] Connect create/join verification
+[ ] Two-device playback sync
+[ ] Two-device seek sync
+[ ] Two-device queue sync
+[ ] Chat verification
+[ ] Disconnect/reconnect verification
+[ ] Clean install
+[ ] Lint
+[ ] Production build
+[ ] Final tree audit
+[ ] Final UX pass
+
+## Current phase
+Phase 1 — Foundation
+
+## Current checkpoint
+1. Dedicated rebuild branch created.
+2. Recovery branch exists.
+3. Rebuild rules are recorded here.
+
+## Change log
+- Keep commits grouped by coherent architectural change.
+- Do not create .before-* source backups.
+- Do not commit generated Android/build output.
+- Do not leave temporary test UI in production.
+
+## Handoff rule
+When continuing in a new chat, read this file first and continue from the first unchecked gate. Never silently skip an earlier unchecked gate.
