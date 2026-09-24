@@ -1,4 +1,9 @@
-const ENDPOINT = '/api/youtube/search'
+const DEFAULT_ENDPOINT = '/api/youtube/search'
+
+function searchEndpoint() {
+  const base = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
+  return base ? base + '/api/youtube/search' : DEFAULT_ENDPOINT
+}
 
 function normalizeResult(item) {
   const snippet = item?.snippet || item
@@ -23,7 +28,7 @@ export async function searchYouTube(query, signal) {
   const value = String(query || '').trim()
   if (value.length < 2) return []
 
-  const response = await fetch(ENDPOINT + '?q=' + encodeURIComponent(value), { signal })
+  const response = await fetch(searchEndpoint() + '?q=' + encodeURIComponent(value), { signal })
   let payload = null
 
   try {
