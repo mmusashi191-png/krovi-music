@@ -70,6 +70,17 @@ function initialPlayback() {
 
 function App() {
   const [view, setView] = useState('home')
+
+  const navigate = useCallback((nextView) => {
+    if (nextView === view) return
+
+    if (typeof document.startViewTransition === 'function') {
+      document.startViewTransition(() => setView(nextView))
+      return
+    }
+
+    setView(nextView)
+  }, [view])
   const [theme, setTheme] = useState(() => {
     const stored = readStorage(STORAGE.theme, 'rose')
     return THEMES.includes(stored) ? stored : 'rose'
@@ -382,8 +393,8 @@ function App() {
       ? [...source].sort(() => Math.random() - 0.5)
       : source
     selectTrack(queue[0], true, queue)
-    setView('home')
-  }, [selectTrack])
+    navigate('home')
+  }, [navigate, selectTrack])
 
   const submitSearch = useCallback((value) => {
     const query = String(value || '').trim()
@@ -400,8 +411,8 @@ function App() {
       query,
       ...current.filter((item) => item.toLowerCase() !== query.toLowerCase()),
     ].slice(0, 8))
-    setView('explore')
-  }, [])
+    navigate('explore')
+  }, [navigate])
 
   useEffect(() => {
     if (!search.submittedQuery) return undefined
@@ -582,7 +593,7 @@ function App() {
         />
       )}
       <header className="topbar">
-        <button type="button" className="brand-button" onClick={() => setView('home')} aria-label="Krovi home">
+        <button type="button" className="brand-button" onClick={() => navigate('home')} aria-label="Krovi home">
           <span className="brand-mark">k</span>
           <span className="brand-name">Krovi</span>
         </button>
@@ -605,7 +616,7 @@ function App() {
             likedTracks={likedTracks}
             playlists={playlists}
             onSubmitSearch={submitSearch}
-            onOpenExplore={() => setView('explore')}
+            onOpenExplore={() => navigate('explore')}
             onPlay={(track) => selectTrack(track, true)}
             onPlayAll={playAll}
           />
@@ -629,7 +640,7 @@ function App() {
             likedTracks={likedTracks}
             onToggleLike={toggleLike}
             onRequestPlaylist={setPlaylistPickerTrack}
-            onBack={() => setView('home')}
+            onBack={() => navigate('home')}
           />
         )}
 
@@ -651,7 +662,7 @@ function App() {
             onToggleLike={toggleLike}
             onRemoveRecent={(videoId) => setRecentTracks((current) => current.filter((track) => track.videoId !== videoId))}
             onRequestPlaylist={setPlaylistPickerTrack}
-            onExplore={() => setView('explore')}
+            onExplore={() => navigate('explore')}
           />
         )}
         </div>
@@ -663,7 +674,7 @@ function App() {
           ['explore', 'Explore', Compass],
           ['library', 'Library', Library],
         ].map(([key, label, Icon]) => (
-          <button type="button" key={key} className={view === key ? 'active' : ''} onClick={() => setView(key)}>
+          <button type="button" key={key} className={view === key ? 'active' : ''} onClick={() => navigate(key)}>
             <Icon size={19} />
             <span>{label}</span>
           </button>
