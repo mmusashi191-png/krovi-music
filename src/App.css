@@ -2496,6 +2496,7 @@ input[type="range"] {
 
 .startup-screen {
   position: fixed;
+  will-change: opacity, transform;
   inset: 0;
   padding: var(--safe-top) 0 var(--safe-bottom);
   z-index: 999;
@@ -2617,7 +2618,8 @@ input[type="range"] {
 
 .startup-screen.is-exiting {
   pointer-events: none;
-  animation: startupExit 400ms var(--ease-out) forwards;
+  animation: startupExit 420ms var(--ease-out) forwards;
+  will-change: opacity, transform;
 }
 
 @keyframes pipEnter {
@@ -2626,10 +2628,10 @@ input[type="range"] {
 }
 
 @keyframes themeCircle {
-  0% { clip-path: circle(0% at 94% 5%); opacity: 1; }
-  68% { clip-path: circle(155% at 94% 5%); opacity: 1; }
-  86% { clip-path: circle(155% at 94% 5%); opacity: .96; }
-  100% { clip-path: circle(155% at 94% 5%); opacity: 0; }
+  0% { transform: scale(0); opacity: 1; }
+  66% { transform: scale(1); opacity: 1; }
+  84% { transform: scale(1.015); opacity: .9; }
+  100% { transform: scale(1.03); opacity: 0; }
 }
 
 @keyframes activeNavPop {
@@ -2754,28 +2756,35 @@ input[type="range"] {
 }
 
 @keyframes startupExit {
-  from { opacity: 1; clip-path: inset(0 0 0 0); transform: scale(1); }
-  70% { opacity: 1; clip-path: inset(0 0 22% 0); transform: scale(1.012); }
-  to { opacity: 0; clip-path: inset(0 0 100% 0); transform: scale(1.018); }
+  from { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  55% { opacity: 1; transform: translate3d(0, -7px, 0) scale(1.01); }
+  to { opacity: 0; transform: translate3d(0, -22px, 0) scale(1.025); }
 }
 
 .theme-transition {
   position: fixed;
-  inset: 0;
+  top: -4vmax;
+  right: -4vmax;
+  width: 230vmax;
+  height: 230vmax;
   z-index: 120;
   pointer-events: none;
-  animation: themeCircle 760ms cubic-bezier(.22,.78,.2,1) both;
+  border-radius: 50%;
+  transform: scale(0);
+  transform-origin: 100% 0%;
+  will-change: transform, opacity;
+  animation: themeCircle 780ms cubic-bezier(.2,.8,.2,1) both;
 }
 
 .theme-transition-rose {
   background:
-    radial-gradient(circle at 20% 20%, rgb(255 236 239 / 70%), transparent 24%),
+    radial-gradient(circle at 34% 30%, rgb(255 248 244 / 92%), transparent 28%),
     #f3e9e4;
 }
 
 .theme-transition-verdant {
   background:
-    radial-gradient(circle at 22% 18%, rgb(246 218 183 / 18%), transparent 23%),
+    radial-gradient(circle at 34% 30%, rgb(239 224 199 / 14%), transparent 28%),
     #1c211d;
 }
 
