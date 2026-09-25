@@ -29,7 +29,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onResume() {
+    public void onResume() {
         super.onResume();
         attachMediaBridge();
     }
@@ -93,7 +93,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onDestroy() {
+    public void onDestroy() {
         if (mediaCommandReceiver != null) {
             unregisterReceiver(mediaCommandReceiver);
             mediaCommandReceiver = null;
