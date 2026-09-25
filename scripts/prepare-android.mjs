@@ -39,10 +39,7 @@ if (existsSync(nativeLogoPath)) {
 }
 
 for (const file of ['MainActivity.java', 'KroviMediaService.java']) {
-  copyFileSync(
-    join(nativeSourceDir, file),
-    join(nativeTargetDir, file),
-  )
+  copyFileSync(join(nativeSourceDir, file), join(nativeTargetDir, file))
 }
 
 const manifestPath = join(androidDir, 'app', 'src', 'main', 'AndroidManifest.xml')
@@ -64,15 +61,43 @@ for (const permission of permissions) {
   }
 }
 
-const applicationTag = '<application'
-if (existsSync(drawableLogoPath)) {
-  const iconAttribute = ' android:icon="@drawable/krovi_logo" android:roundIcon="@drawable/krovi_logo"'
-  const applicationStart = manifest.indexOf(applicationTag)
-  const applicationEnd = applicationStart >= 0 ? manifest.indexOf('>', applicationStart) : -1
-  if (applicationStart >= 0 && applicationEnd >= 0 && !manifest.includes('android:icon="@drawable/krovi_logo"')) {
-    const opening = manifest.slice(applicationStart, applicationEnd)
-    manifest = manifest.slice(0, applicationStart) + opening + iconAttribute + manifest.slice(applicationEnd)
+function removeXmlAttribute(openingTag, attributeName) {
+  const token = ' ' + attributeName + '="'
+
+  while (true) {
+    const start = openingTag.indexOf(token)
+    if (start < 0) return openingTag
+
+    const valueStart = start + token.length
+    const valueEnd = openingTag.indexOf('"', valueStart)
+
+    if (valueEnd < 0) return openingTag
+
+    openingTag =
+      openingTag.slice(0, start) +
+      openingTag.slice(valueEnd + 1)
   }
+}
+
+const applicationTag = '<application'
+const applicationStart = manifest.indexOf(applicationTag)
+const applicationEnd = applicationStart >= 0
+  ? manifest.indexOf('>', applicationStart)
+  : -1
+
+if (existsSync(drawableLogoPath) && applicationStart >= 0 && applicationEnd >= 0) {
+  let opening = manifest.slice(applicationStart, applicationEnd)
+
+  opening = removeXmlAttribute(opening, 'android:icon')
+  opening = removeXmlAttribute(opening, 'android:roundIcon')
+
+  opening += ' android:icon="@drawable/krovi_logo"'
+  opening += ' android:roundIcon="@drawable/krovi_logo"'
+
+  manifest =
+    manifest.slice(0, applicationStart) +
+    opening +
+    manifest.slice(applicationEnd)
 }
 
 if (!manifest.includes('com.krovi.music.KroviMediaService')) {
@@ -170,4 +195,4 @@ const v31StylesPath = join(v31Dir, 'styles.xml')
 mkdirSync(v31Dir, { recursive: true })
 patchLaunchTheme(v31StylesPath, true)
 
-console.log('Krovi Android media service and launch theme prepared.')
+console.log('Krovi Android media service, launcher icon, and launch theme prepared.')
