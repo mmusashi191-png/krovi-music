@@ -10,13 +10,14 @@ export function requestNativeMediaPermission() {
   }
 }
 
-export function startNativeMedia(track) {
+export function updateNativeMedia(track, isPlaying) {
   if (!track) return
 
   try {
-    bridge()?.start?.(
+    bridge()?.update?.(
       String(track.title || 'Krovi Music'),
       String(track.artist || 'YouTube'),
+      Boolean(isPlaying),
     )
   } catch {
     // Keep web playback independent from native notification support.
