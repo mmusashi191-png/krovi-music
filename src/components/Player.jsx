@@ -160,6 +160,7 @@ export default function Player({
   const playerRef = useRef(null)
   const currentVideoIdRef = useRef('')
   const currentTrackRef = useRef(playback.currentTrack)
+  const currentTimeRef = useRef(playback.currentTime)
   const queueRef = useRef(playback.queue)
   const queueIndexRef = useRef(playback.currentQueueIndex)
   const playingRef = useRef(playback.isPlaying)
@@ -184,6 +185,7 @@ export default function Player({
   const liked = Boolean(track && likedTracks.some((item) => item.videoId === track.videoId))
 
   useEffect(() => { currentTrackRef.current = track }, [track])
+  useEffect(() => { currentTimeRef.current = playback.currentTime }, [playback.currentTime])
   useEffect(() => { queueRef.current = playback.queue }, [playback.queue])
   useEffect(() => { queueIndexRef.current = playback.currentQueueIndex }, [playback.currentQueueIndex])
   useEffect(() => { playingRef.current = isPlaying }, [isPlaying])
@@ -512,7 +514,7 @@ export default function Player({
     if (!player) return
 
     const nextPlaying = !playingRef.current
-    const current = Number(player.getCurrentTime?.()) || playbackRef.current.currentTime
+    const current = Number(player.getCurrentTime?.()) || currentTimeRef.current
 
     onPlaybackChange({
       isPlaying: nextPlaying,
