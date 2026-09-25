@@ -23,6 +23,7 @@ public class KroviMediaService extends Service {
     public static final String ACTION_COMMAND = "com.krovi.music.media.COMMAND";
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_ARTIST = "artist";
+    public static final String EXTRA_PLAYING = "playing";
     public static final String EXTRA_COMMAND = "command";
 
     private static final int NOTIFICATION_ID = 61042;
@@ -32,11 +33,12 @@ public class KroviMediaService extends Service {
     private String artist = "YouTube";
     private boolean playing = true;
 
-    public static void start(Context context, String title, String artist) {
+    public static void update(Context context, String title, String artist, boolean playing) {
         Intent intent = new Intent(context, KroviMediaService.class)
-            .setAction(ACTION_START)
+            .setAction(ACTION_UPDATE)
             .putExtra(EXTRA_TITLE, title)
-            .putExtra(EXTRA_ARTIST, artist);
+            .putExtra(EXTRA_ARTIST, artist)
+            .putExtra(EXTRA_PLAYING, playing);
 
         if (Build.VERSION.SDK_INT >= 26) {
             context.startForegroundService(intent);
@@ -93,6 +95,17 @@ public class KroviMediaService extends Service {
             return START_NOT_STICKY;
         }
 
+        if (ACTION_UPDATE.equals(action)) {
+            String nextTitle = intent.getStringExtra(EXTRA_TITLE);
+            String nextArtist = intent.getStringExtra(EXTRA_ARTIST);
+            if (nextTitle != null && !nextTitle.isBlank()) title = nextTitle;
+            if (nextArtist != null && !nextArtist.isBlank()) artist = nextArtist;
+            playing = intent.getBooleanExtra(EXTRA_PLAYING, false);
+            publishPlaybackState();
+            startNotification();
+            return START_STICKY;
+        }
+
         if (intent != null) {
             String nextTitle = intent.getStringExtra(EXTRA_TITLE);
             String nextArtist = intent.getStringExtra(EXTRA_ARTIST);
@@ -100,9 +113,17 @@ public class KroviMediaService extends Service {
             if (nextArtist != null && !nextArtist.isBlank()) artist = nextArtist;
         }
 
-        if (ACTION_PLAY_PAUSE.equals(action) || ACTION_PREVIOUS.equals(action) || ACTION_NEXT.equals(action)) {
-            handleAction(action);
-            return START_NOT_STICKY;
+        if (ACTION_PLAY_PAUSE.equals(action)) {
+            playing = !playing;
+            publishPlaybackState();
+            startNotification();
+            sendCommand(playing ? "play" : "pause");
+            return START_STICKY;
+        }
+
+        if (ACTION_PREVIOUS.equals(action) || ACTION_NEXT.equals(action)) {
+            sendCommand(ACTION_PREVIOUS.equals(action) ? "previous" : "next");
+            return START_STICKY;
         }
 
         playing = true;
@@ -190,22 +211,6 @@ public class KroviMediaService extends Service {
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
         return flags;
-    }
-
-    private void handleAction(String action) {
-        if (ACTION_PLAY_PAUSE.equals(action)) {
-            sendCommand(playing ? "pause" : "play");
-            return;
-        }
-
-        if (ACTION_PREVIOUS.equals(action)) {
-            sendCommand("previous");
-            return;
-        }
-
-        if (ACTION_NEXT.equals(action)) {
-            sendCommand("next");
-        }
     }
 
     private void publishPlaybackState() {
