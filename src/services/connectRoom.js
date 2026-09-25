@@ -14,7 +14,7 @@ let httpConnected = false
 let transportMode = 'ws'
 const listeners = new Set()
 const snapshots = new Map()
-const CONNECT_HTTP_TIMEOUT_MS = 45_000
+const CONNECT_HTTP_TIMEOUT_MS = 30_000
 
 export const connectConfigMessage = 'Connect is unavailable. Check the network connection and try again.'
 
@@ -215,7 +215,7 @@ async function pollHttpRoom() {
   } catch (error) {
     const code = error?.code
 
-    if (code === 'ROOM_NOT_FOUND' || code === 'NOT_IN_ROOM') {
+    if (code === 'ROOM_NOT_FOUND' || code === 'NOT_IN_ROOM' || code === 'ROOM_FULL' || code === 'INVALID_ROOM_CODE') {
       stopHttpPolling()
       notify({
         type: 'error',
@@ -248,7 +248,7 @@ function startHttpPolling(roomCode) {
 
   httpPollTimer = window.setInterval(() => {
     pollHttpRoom().catch(() => {})
-  }, 1000)
+  }, 900)
 }
 
 function connectSocket() {
@@ -337,8 +337,6 @@ async function createRoomHttp(playback = {}) {
 }
 
 async function joinRoomHttp(roomCode) {
-  await warmHostedService()
-
   const response = await requestHttp(
     '/api/connect/rooms/' + encodeURIComponent(roomCode) + '/join',
     {

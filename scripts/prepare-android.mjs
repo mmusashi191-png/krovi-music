@@ -14,6 +14,11 @@ if (!existsSync(androidDir)) {
   })
 }
 
+const nativeAssetsDir = join(root, 'native', 'android', 'assets')
+const nativeLogoPath = join(nativeAssetsDir, 'krovi_logo.png')
+const drawableDir = join(androidDir, 'app', 'src', 'main', 'res', 'drawable')
+const drawableLogoPath = join(drawableDir, 'krovi_logo.png')
+
 const nativeSourceDir = join(root, 'native', 'android', 'com', 'krovi', 'music')
 const nativeTargetDir = join(
   androidDir,
@@ -27,6 +32,11 @@ const nativeTargetDir = join(
 )
 
 mkdirSync(nativeTargetDir, { recursive: true })
+mkdirSync(drawableDir, { recursive: true })
+
+if (existsSync(nativeLogoPath)) {
+  copyFileSync(nativeLogoPath, drawableLogoPath)
+}
 
 for (const file of ['MainActivity.java', 'KroviMediaService.java']) {
   copyFileSync(
@@ -51,6 +61,17 @@ for (const permission of permissions) {
       '    <application',
       permission + '\n\n    <application',
     )
+  }
+}
+
+const applicationTag = '<application'
+if (existsSync(drawableLogoPath)) {
+  const iconAttribute = ' android:icon="@drawable/krovi_logo" android:roundIcon="@drawable/krovi_logo"'
+  const applicationStart = manifest.indexOf(applicationTag)
+  const applicationEnd = applicationStart >= 0 ? manifest.indexOf('>', applicationStart) : -1
+  if (applicationStart >= 0 && applicationEnd >= 0 && !manifest.includes('android:icon="@drawable/krovi_logo"')) {
+    const opening = manifest.slice(applicationStart, applicationEnd)
+    manifest = manifest.slice(0, applicationStart) + opening + iconAttribute + manifest.slice(applicationEnd)
   }
 }
 

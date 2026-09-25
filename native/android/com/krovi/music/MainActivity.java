@@ -12,7 +12,6 @@ import android.os.Bundle;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
-import android.webkit.WebSettings;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -32,45 +31,6 @@ public class MainActivity extends BridgeActivity {
         attachMediaBridge();
     }
 
-    @Override
-    public void onResume() {
-        super.onResume();
-        attachMediaBridge();
-
-        if (webView != null) {
-            webView.onResume();
-            webView.resumeTimers();
-        }
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-
-        if (KroviMediaService.isPlaybackActive() && webView != null) {
-            webView.post(() -> {
-                if (KroviMediaService.isPlaybackActive()) {
-                    webView.onResume();
-                    webView.resumeTimers();
-                }
-            });
-        }
-    }
-
-    @Override
-    public void onStop() {
-        super.onStop();
-
-        if (KroviMediaService.isPlaybackActive() && webView != null) {
-            webView.post(() -> {
-                if (KroviMediaService.isPlaybackActive()) {
-                    webView.onResume();
-                    webView.resumeTimers();
-                }
-            });
-        }
-    }
-
     private void attachMediaBridge() {
         if (mediaBridgeAttached) return;
 
@@ -87,10 +47,7 @@ public class MainActivity extends BridgeActivity {
             );
         }
 
-        webView.addJavascriptInterface(
-            new KroviMediaJsBridge(this),
-            "KroviMedia"
-        );
+        webView.addJavascriptInterface(new KroviMediaJsBridge(this), "KroviMedia");
         mediaBridgeAttached = true;
     }
 
@@ -114,9 +71,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void dispatchMediaCommand(String command) {
-        if (webView == null) {
-            attachMediaBridge();
-        }
+        if (webView == null) attachMediaBridge();
         if (webView == null) return;
 
         final String safeCommand = JSONObject.quote(command);
@@ -157,8 +112,37 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
-        public void update(String title, String artist, boolean playing) {
-            KroviMediaService.update(activity, title, artist, playing);
+        public void update(
+            String title,
+            String artist,
+            boolean playing,
+            double duration,
+            double position,
+            String artwork
+        ) {
+            KroviMediaService.update(
+                activity,
+                title,
+                artist,
+                playing,
+                duration,
+                position,
+                artwork
+            );
+        }
+
+        @JavascriptInterface
+        public void updatePlayback(
+            boolean playing,
+            double duration,
+            double position
+        ) {
+            KroviMediaService.updatePlayback(
+                activity,
+                playing,
+                duration,
+                position
+            );
         }
 
         @JavascriptInterface

@@ -566,7 +566,7 @@ function App() {
 
     setThemeTransition({ theme: nextTheme, x, y })
     window.requestAnimationFrame(() => setTheme(nextTheme))
-    window.setTimeout(() => setThemeTransition(null), 720)
+    window.setTimeout(() => setThemeTransition(null), 560)
   }, [theme])
 
   return (
