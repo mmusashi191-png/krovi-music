@@ -21,8 +21,8 @@ import {
 } from 'lucide-react'
 import {
   requestNativeMediaPermission,
-  startNativeMedia,
   stopNativeMedia,
+  updateNativeMedia,
 } from '../services/nativeMedia.js'
 
 let youtubeApiPromise
@@ -579,15 +579,12 @@ export default function Player({
       return
     }
 
-    if (isPlaying) {
-      if (!nativeNotificationRequestedRef.current) {
-        nativeNotificationRequestedRef.current = true
-        requestNativeMediaPermission()
-      }
-      startNativeMedia(track)
-    } else {
-      stopNativeMedia()
+    if (!nativeNotificationRequestedRef.current) {
+      nativeNotificationRequestedRef.current = true
+      requestNativeMediaPermission()
     }
+
+    updateNativeMedia(track, isPlaying)
   }, [isPlaying, track])
 
   useEffect(() => {
