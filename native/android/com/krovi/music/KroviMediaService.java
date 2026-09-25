@@ -87,7 +87,7 @@ public class KroviMediaService extends Service {
         }
     }
 
-    public static void updatePlayback(Context context, boolean playing, double duration, double position) {
+    // Backward-compatible bridge entry point for older web bundles.\n    public static void update(Context context, String title, String artist, boolean playing) {\n        update(context, title, artist, playing, 0, 0, "");\n    }\n\n    public static void updatePlayback(Context context, boolean playing, double duration, double position) {
         Intent intent = new Intent(context, KroviMediaService.class)
             .setAction(ACTION_PROGRESS)
             .putExtra(EXTRA_PLAYING, playing)
@@ -318,7 +318,7 @@ public class KroviMediaService extends Service {
         });
     }
 
-    private int pendingIntentFlags() {
+    private PendingIntent servicePendingIntent(String action) {\n        Intent intent = new Intent(this, KroviMediaService.class)\n            .setAction(action);\n\n        return PendingIntent.getService(\n            this,\n            action.hashCode(),\n            intent,\n            pendingIntentFlags()\n        );\n    }\n\n    private int pendingIntentFlags() {
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
         return flags;
