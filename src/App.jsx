@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Compass, Library, Link2, Home as HomeIcon } from 'lucide-react'
 import './App.css'
+import './world-class.css'
 import Connect from './components/Connect.jsx'
 import Explore from './components/Explore.jsx'
 import Home from './components/Home.jsx'
