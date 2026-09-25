@@ -29,11 +29,12 @@ public class KroviMediaService extends Service {
 
     private static final int NOTIFICATION_ID = 61042;
     private static final String CHANNEL_ID = "krovi-playback";
+
     private MediaSession mediaSession;
     private PowerManager.WakeLock wakeLock;
     private String title = "Krovi Music";
     private String artist = "YouTube";
-    private boolean playing = true;
+    private boolean playing;
 
     public static void update(Context context, String title, String artist, boolean playing) {
         Intent intent = new Intent(context, KroviMediaService.class)
@@ -50,7 +51,7 @@ public class KroviMediaService extends Service {
     }
 
     public static void stop(Context context) {
-        context.startService(new Intent(context, KroviMediaService.class).setAction(ACTION_STOP));
+        context.stopService(new Intent(context, KroviMediaService.class));
     }
 
     @Override
@@ -85,6 +86,7 @@ public class KroviMediaService extends Service {
                 sendCommand("pause");
             }
         });
+
         mediaSession.setActive(true);
     }
 
@@ -100,23 +102,32 @@ public class KroviMediaService extends Service {
         if (ACTION_UPDATE.equals(action)) {
             String nextTitle = intent.getStringExtra(EXTRA_TITLE);
             String nextArtist = intent.getStringExtra(EXTRA_ARTIST);
+
             if (nextTitle != null && !nextTitle.isBlank()) title = nextTitle;
             if (nextArtist != null && !nextArtist.isBlank()) artist = nextArtist;
+
             playing = intent.getBooleanExtra(EXTRA_PLAYING, false);
+
+            if (playing) {
+                ensureWakeLock();
+            } else {
+                releaseWakeLock();
+            }
+
             publishPlaybackState();
             startNotification();
             return START_STICKY;
         }
 
-        if (intent != null) {
-            String nextTitle = intent.getStringExtra(EXTRA_TITLE);
-            String nextArtist = intent.getStringExtra(EXTRA_ARTIST);
-            if (nextTitle != null && !nextTitle.isBlank()) title = nextTitle;
-            if (nextArtist != null && !nextArtist.isBlank()) artist = nextArtist;
-        }
-
         if (ACTION_PLAY_PAUSE.equals(action)) {
             playing = !playing;
+
+            if (playing) {
+                ensureWakeLock();
+            } else {
+                releaseWakeLock();
+            }
+
             publishPlaybackState();
             startNotification();
             sendCommand(playing ? "play" : "pause");
@@ -160,6 +171,7 @@ public class KroviMediaService extends Service {
     private Notification buildNotification() {
         Intent openApp = new Intent(this, MainActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
         PendingIntent contentIntent = PendingIntent.getActivity(
             this,
             61043,
@@ -178,7 +190,7 @@ public class KroviMediaService extends Service {
             .setContentIntent(contentIntent)
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setOngoing(playing)
+            .setOngoing(true)
             .setShowWhen(false)
             .setOnlyAlertOnce(true)
             .setStyle(
@@ -235,7 +247,11 @@ public class KroviMediaService extends Service {
         mediaSession.setPlaybackState(
             new PlaybackState.Builder()
                 .setActions(actions)
-                .setState(playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, 0L, 1f)
+                .setState(
+                    playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED,
+                    0L,
+                    playing ? 1f : 0f
+                )
                 .build()
         );
     }
@@ -243,6 +259,7 @@ public class KroviMediaService extends Service {
     private void stopNotification() {
         playing = false;
         releaseWakeLock();
+
         if (mediaSession != null) {
             mediaSession.setActive(false);
         }
@@ -252,6 +269,7 @@ public class KroviMediaService extends Service {
         } else {
             stopForeground(true);
         }
+
         stopSelf();
     }
 
@@ -293,22 +311,29 @@ public class KroviMediaService extends Service {
     }
 
     @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        if (playing) {
+            ensureWakeLock();
+            startNotification();
+        }
+
+        super.onTaskRemoved(rootIntent);
+    }
+
+    @Override
     public void onDestroy() {
         releaseWakeLock();
+
         if (mediaSession != null) {
             mediaSession.release();
             mediaSession = null;
         }
+
         super.onDestroy();
     }
 
     @Override
     public IBinder onBind(Intent intent) {
         return null;
-    }
-
-    @Override
-    public void onTaskRemoved(Intent rootIntent) {
-        super.onTaskRemoved(rootIntent);
     }
 }

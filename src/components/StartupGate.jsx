@@ -6,8 +6,8 @@ export default function StartupGate({ children }) {
   const [exiting, setExiting] = useState(false)
 
   useEffect(() => {
-    const exitTimer = window.setTimeout(() => setExiting(true), 1120)
-    const removeTimer = window.setTimeout(() => setVisible(false), 1560)
+    const exitTimer = window.setTimeout(() => setExiting(true), 1650)
+    const removeTimer = window.setTimeout(() => setVisible(false), 2140)
 
     return () => {
       window.clearTimeout(exitTimer)

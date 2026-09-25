@@ -19,10 +19,16 @@ app.disable('x-powered-by')
 
 app.use((request, response, next) => {
   response.setHeader('Access-Control-Allow-Origin', '*')
-  response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  if (request.method === 'OPTIONS') {
+    response.sendStatus(204)
+    return
+  }
   next()
 })
+
+app.use(express.json({ limit: '100kb' }))
 
 app.get('/health', (_request, response) => response.json({
   ok: true,
@@ -131,6 +137,7 @@ function makeRoom(playback, hostClientId) {
     queue: cleanQueue(playback?.queue),
     chatMessages: [],
     version: 0,
+    restLastSeen: new Map(),
   }
 }
 
@@ -268,6 +275,239 @@ function handleRoomMessage(client, message) {
   send(client, { type: 'error', code: 'UNKNOWN_MESSAGE', message: 'That Connect action is not supported.' })
 }
 
+
+function normalizeRestClientId(value) {
+  const clientId = String(value || '').trim()
+  return clientId ? clientId.slice(0, 100) : ''
+}
+
+function removeRestParticipant(room, clientId) {
+  if (!room) return
+
+  room.participants.delete(clientId)
+  room.restLastSeen?.delete(clientId)
+
+  if (!room.participants.size) {
+    rooms.delete(room.roomCode)
+    return
+  }
+
+  broadcastPresence(room)
+}
+
+function detachParticipantEverywhere(clientId) {
+  for (const room of rooms.values()) {
+    if (!room.participants.has(clientId)) continue
+    if (clients.has(clientId)) continue
+    removeRestParticipant(room, clientId)
+  }
+}
+
+function getRestRoom(request, response) {
+  const roomCode = String(request.params.roomCode || '').trim().toUpperCase()
+  const clientId = normalizeRestClientId(request.body?.clientId || request.query?.clientId)
+
+  if (!/^[A-Z0-9]{6}$/.test(roomCode) || !clientId) {
+    response.status(400).json({
+      code: 'INVALID_CONNECT_REQUEST',
+      message: 'Connect request is invalid.',
+    })
+    return null
+  }
+
+  const room = rooms.get(roomCode)
+
+  if (!room) {
+    response.status(404).json({
+      code: 'ROOM_NOT_FOUND',
+      message: 'That room is no longer available.',
+    })
+    return null
+  }
+
+  if (!room.participants.has(clientId)) {
+    response.status(403).json({
+      code: 'NOT_IN_ROOM',
+      message: 'Join this room before sending updates.',
+    })
+    return null
+  }
+
+  room.restLastSeen?.set(clientId, Date.now())
+  return { room, clientId }
+}
+
+app.post('/api/connect/rooms', (request, response) => {
+  const clientId = normalizeRestClientId(request.body?.clientId)
+
+  if (!clientId) {
+    response.status(400).json({
+      code: 'INVALID_CLIENT',
+      message: 'Connect could not identify this listener.',
+    })
+    return
+  }
+
+  detachParticipantEverywhere(clientId)
+
+  const room = makeRoom(request.body?.playback, clientId)
+  room.restLastSeen.set(clientId, Date.now())
+  rooms.set(room.roomCode, room)
+
+  response.status(201).json({
+    ...roomState(room),
+    role: 'host',
+  })
+})
+
+app.post('/api/connect/rooms/:roomCode/join', (request, response) => {
+  const roomCode = String(request.params.roomCode || '').trim().toUpperCase()
+  const clientId = normalizeRestClientId(request.body?.clientId)
+
+  if (!/^[A-Z0-9]{6}$/.test(roomCode) || !clientId) {
+    response.status(400).json({
+      code: 'INVALID_CONNECT_REQUEST',
+      message: 'Enter a valid 6-character room code.',
+    })
+    return
+  }
+
+  const room = rooms.get(roomCode)
+
+  if (!room) {
+    response.status(404).json({
+      code: 'ROOM_NOT_FOUND',
+      message: 'That room is no longer available.',
+    })
+    return
+  }
+
+  if (!room.participants.has(clientId) && room.participants.size >= 2) {
+    response.status(409).json({
+      code: 'ROOM_FULL',
+      message: 'This listening room already has two listeners.',
+    })
+    return
+  }
+
+  detachParticipantEverywhere(clientId)
+  room.participants.add(clientId)
+  room.restLastSeen.set(clientId, Date.now())
+
+  response.json({
+    ...roomState(room),
+    role: room.hostClientId === clientId ? 'host' : 'guest',
+  })
+})
+
+app.get('/api/connect/rooms/:roomCode/state', (request, response) => {
+  const result = getRestRoom(request, response)
+  if (!result) return
+
+  response.json(roomState(result.room))
+})
+
+app.post('/api/connect/rooms/:roomCode/playback', (request, response) => {
+  const result = getRestRoom(request, response)
+  if (!result) return
+
+  const { room, clientId } = result
+  const track = normalizeTrack(request.body?.activeVideoMetadata)
+
+  room.activeVideoId = typeof request.body?.activeVideoId === 'string'
+    ? request.body.activeVideoId.slice(0, 30)
+    : track?.videoId || ''
+  room.activeVideoMetadata = track
+  room.isPlaying = Boolean(request.body?.isPlaying)
+  room.playbackPosition = Math.max(0, Number(request.body?.playbackPosition) || 0)
+  room.updatedAt = Date.now()
+  room.version += 1
+
+  const command = ['track', 'playback', 'seek'].includes(request.body?.command)
+    ? request.body.command
+    : 'playback'
+
+  const seekPosition = Number.isFinite(Number(request.body?.seekPosition))
+    ? Math.max(0, Number(request.body.seekPosition))
+    : null
+
+  broadcast(room, {
+    type: 'playback-state',
+    roomCode: room.roomCode,
+    activeVideoId: room.activeVideoId,
+    activeVideoMetadata: room.activeVideoMetadata,
+    isPlaying: room.isPlaying,
+    playbackPosition: room.playbackPosition,
+    updatedAt: room.updatedAt,
+    command,
+    seekId: (command === 'track' || command === 'seek') ? crypto.randomUUID() : null,
+    seekPosition,
+    version: room.version,
+  }, clientId)
+
+  response.json(roomState(room))
+})
+
+app.post('/api/connect/rooms/:roomCode/queue', (request, response) => {
+  const result = getRestRoom(request, response)
+  if (!result) return
+
+  const { room, clientId } = result
+  room.queue = cleanQueue(request.body?.queue)
+  room.updatedAt = Date.now()
+  room.version += 1
+
+  broadcast(room, {
+    type: 'queue-state',
+    roomCode: room.roomCode,
+    queue: room.queue,
+    version: room.version,
+  }, clientId)
+
+  response.json(roomState(room))
+})
+
+app.post('/api/connect/rooms/:roomCode/chat', (request, response) => {
+  const result = getRestRoom(request, response)
+  if (!result) return
+
+  const { room, clientId } = result
+  const text = String(request.body?.text || '').trim().slice(0, 280)
+
+  if (!text) {
+    response.status(400).json({
+      code: 'EMPTY_MESSAGE',
+      message: 'Write a message before sending it.',
+    })
+    return
+  }
+
+  const chatMessage = {
+    id: crypto.randomUUID(),
+    clientId,
+    text,
+    sentAt: Date.now(),
+  }
+
+  room.chatMessages = [...room.chatMessages, chatMessage].slice(-50)
+
+  broadcast(room, {
+    type: 'chat-message',
+    roomCode: room.roomCode,
+    message: chatMessage,
+  })
+
+  response.json(chatMessage)
+})
+
+app.post('/api/connect/rooms/:roomCode/leave', (request, response) => {
+  const result = getRestRoom(request, response)
+  if (!result) return
+
+  removeRestParticipant(result.room, result.clientId)
+  response.json({ type: 'left-room' })
+})
+
 app.get('/api/youtube/search', async (request, response) => {
   const query = String(request.query.q || '').trim()
 
@@ -377,6 +617,27 @@ websocketServer.on('connection', (socket) => {
   socket.on('error', cleanupClient)
 })
 
+const restPresenceCleanup = setInterval(() => {
+  const now = Date.now()
+
+  for (const room of rooms.values()) {
+    for (const [clientId, lastSeen] of room.restLastSeen || []) {
+      if (clients.has(clientId)) continue
+      if (now - lastSeen <= 15_000) continue
+
+      room.participants.delete(clientId)
+      room.restLastSeen.delete(clientId)
+      broadcastPresence(room)
+    }
+
+    if (!room.participants.size) {
+      rooms.delete(room.roomCode)
+    }
+  }
+}, 5_000)
+
+restPresenceCleanup.unref?.()
+
 const heartbeat = setInterval(() => {
   for (const client of clients.values()) {
     if (!client.isAlive) {
@@ -398,6 +659,7 @@ server.listen(PORT, '0.0.0.0', () => {
 
 function shutdown() {
   clearInterval(heartbeat)
+  clearInterval(restPresenceCleanup)
   websocketServer.close()
   server.close(() => process.exit(0))
 }

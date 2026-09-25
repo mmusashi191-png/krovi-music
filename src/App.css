@@ -644,7 +644,7 @@ button:disabled {
   background: var(--accent);
   border-radius: 50%;
   box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 24%, transparent);
-  transition: transform 180ms var(--ease-spring);
+  transition: transform 110ms cubic-bezier(.2,.8,.2,1);
 }
 
 .track-tile:hover .tile-play {
@@ -1192,7 +1192,7 @@ button:disabled {
 .mini-play:active,
 .control-pill:active,
 .hero-search-button:active {
-  transform: scale(.95);
+  transform: scale(.94);
 }
 
 .player-backdrop,
@@ -1220,7 +1220,7 @@ button:disabled {
   border-radius: 19px;
   box-shadow: var(--shadow-strong);
   transform: translateX(-50%);
-  animation: dockEnter 620ms var(--ease-spring) both;
+  animation: dockEnter 360ms cubic-bezier(.2,.8,.2,1) both;
 }
 
 .player-dock.is-playing {
@@ -1242,7 +1242,7 @@ button:disabled {
   border: 1px solid rgb(255 255 255 / 18%);
   border-radius: 17px;
   box-shadow: 0 24px 65px rgb(11 7 9 / 32%);
-  animation: pipEnter 480ms var(--ease-spring) both;
+  animation: pipEnter 320ms cubic-bezier(.2,.8,.2,1) both;
   touch-action: none;
 }
 
@@ -1281,12 +1281,12 @@ button:disabled {
   visibility: visible;
   opacity: 1;
   animation-name: pipEnter, pipSummon;
-  animation-duration: 480ms, 380ms;
+  animation-duration: 320ms, 260ms;
   animation-timing-function: var(--ease-spring), var(--ease-spring);
   animation-fill-mode: both, both;
   transition:
-    opacity 280ms ease,
-    transform 380ms var(--ease-spring);
+    opacity 160ms ease,
+    transform 220ms cubic-bezier(.2,.8,.2,1);
 }
 
 .pip-drag-handle,
@@ -2618,7 +2618,7 @@ input[type="range"] {
 
 .startup-screen.is-exiting {
   pointer-events: none;
-  animation: startupExit 420ms var(--ease-out) forwards;
+  animation: startupExit 490ms cubic-bezier(.2,.8,.2,1) forwards;
   will-change: opacity, transform;
 }
 
@@ -2629,9 +2629,9 @@ input[type="range"] {
 
 @keyframes themeCircle {
   0% { transform: scale(0); opacity: 1; }
-  66% { transform: scale(1); opacity: 1; }
-  84% { transform: scale(1.015); opacity: .9; }
-  100% { transform: scale(1.03); opacity: 0; }
+  72% { transform: scale(1); opacity: 1; }
+  88% { transform: scale(1.01); opacity: .88; }
+  100% { transform: scale(1.02); opacity: 0; }
 }
 
 @keyframes activeNavPop {
@@ -2763,17 +2763,17 @@ input[type="range"] {
 
 .theme-transition {
   position: fixed;
-  top: -4vmax;
-  right: -4vmax;
-  width: 230vmax;
-  height: 230vmax;
+  top: -3vmax;
+  right: -3vmax;
+  width: 170vmax;
+  height: 170vmax;
   z-index: 120;
   pointer-events: none;
   border-radius: 50%;
   transform: scale(0);
   transform-origin: 100% 0%;
   will-change: transform, opacity;
-  animation: themeCircle 780ms cubic-bezier(.2,.8,.2,1) both;
+  animation: themeCircle 680ms cubic-bezier(.2,.8,.2,1) both;
 }
 
 .theme-transition-rose {

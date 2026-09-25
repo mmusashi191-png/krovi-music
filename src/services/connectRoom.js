@@ -8,6 +8,9 @@ let socket = null
 let socketPromise = null
 let desiredRoomCode = ''
 let reconnectTimer = null
+let httpPollTimer = null
+let httpPollBusy = false
+let transportMode = 'ws'
 const listeners = new Set()
 const snapshots = new Map()
 
@@ -24,18 +27,29 @@ function getClientId() {
   return id
 }
 
+function getHttpBaseUrl() {
+  const configured = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
+
+  if (
+    import.meta.env.PROD
+    && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(configured)
+  ) {
+    return DEFAULT_HTTP_URL
+  }
+
+  return configured || DEFAULT_HTTP_URL
+}
+
 function getWebSocketUrl() {
   const configured = String(import.meta.env.VITE_CONNECT_WS_URL || '').trim().replace(/\/$/, '')
   const isStaleProductionLocalUrl = import.meta.env.PROD
     && /^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(configured)
+
   if (configured && !isStaleProductionLocalUrl) return configured
 
   const isNativeApp = Capacitor.isNativePlatform()
   const host = window.location.hostname
 
-  // Capacitor's Android WebView uses a localhost-like origin, but the
-  // Connect server lives on Render. Only browser development should use
-  // the local :8787 socket.
   if (!isNativeApp && (host === 'localhost' || host === '127.0.0.1')) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return protocol + '://' + host + ':8787/ws'
@@ -46,8 +60,8 @@ function getWebSocketUrl() {
 
 function notify(message) {
   if (
-    message.type === 'error' &&
-    ['ROOM_NOT_FOUND', 'ROOM_FULL', 'INVALID_ROOM_CODE'].includes(message.code)
+    message.type === 'error'
+    && ['ROOM_NOT_FOUND', 'ROOM_FULL', 'INVALID_ROOM_CODE'].includes(message.code)
   ) {
     desiredRoomCode = ''
   }
@@ -56,14 +70,20 @@ function notify(message) {
 }
 
 function scheduleReconnect() {
-  if (!desiredRoomCode || reconnectTimer || socket || socketPromise) return
+  if (!desiredRoomCode || reconnectTimer || (socket && socket.readyState === WebSocket.OPEN)) return
 
   reconnectTimer = window.setTimeout(() => {
     reconnectTimer = null
+
+    if (transportMode === 'http') {
+      pollHttpRoom().catch(() => scheduleReconnect())
+      return
+    }
+
     if (desiredRoomCode && !socket && !socketPromise) {
       connectSocket().catch(() => scheduleReconnect())
     }
-  }, 1400)
+  }, 1800)
 }
 
 function attachSocketEvents(nextSocket) {
@@ -111,12 +131,42 @@ function attachSocketEvents(nextSocket) {
   })
 }
 
-async function warmHostedService() {
+async function requestHttp(path, options = {}) {
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), 20_000)
+  const timeout = window.setTimeout(() => controller.abort(), 10_000)
 
   try {
-    const response = await fetch(DEFAULT_HTTP_URL + '/health', {
+    const response = await fetch(getHttpBaseUrl() + path, {
+      ...options,
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+    })
+
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      const error = new Error(payload.message || payload.error || connectConfigMessage)
+      error.code = payload.code || 'CONNECT_HTTP_ERROR'
+      error.status = response.status
+      throw error
+    }
+
+    return payload
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+async function warmHostedService() {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 8_000)
+
+  try {
+    const response = await fetch(getHttpBaseUrl() + '/health', {
       cache: 'no-store',
       signal: controller.signal,
     })
@@ -125,6 +175,87 @@ async function warmHostedService() {
   } finally {
     window.clearTimeout(timeout)
   }
+}
+
+function stopHttpPolling() {
+  if (httpPollTimer) {
+    window.clearInterval(httpPollTimer)
+    httpPollTimer = null
+  }
+
+  httpPollBusy = false
+}
+
+async function pollHttpRoom() {
+  if (!desiredRoomCode || transportMode !== 'http' || httpPollBusy) return
+
+  httpPollBusy = true
+
+  try {
+    const response = await requestHttp(
+      '/api/connect/rooms/' + encodeURIComponent(desiredRoomCode) + '/state?clientId=' + encodeURIComponent(getClientId()),
+      { method: 'GET' },
+    )
+
+    const signature = JSON.stringify([
+      response.participantCount,
+      response.activeVideoId,
+      response.activeVideoMetadata?.videoId || '',
+      response.isPlaying,
+      response.playbackPosition,
+      response.updatedAt,
+      response.version,
+      response.queue,
+      response.chatMessages,
+    ])
+
+    if (snapshots.get(desiredRoomCode)?.__httpSignature !== signature) {
+      const snapshot = {
+        ...response,
+        type: 'room-state',
+        role: null,
+        __httpSignature: signature,
+      }
+
+      snapshots.set(desiredRoomCode, snapshot)
+      notify(snapshot)
+    }
+
+    notify({ type: 'connection-state', state: 'connected' })
+  } catch (error) {
+    const code = error?.code
+
+    if (code === 'ROOM_NOT_FOUND' || code === 'NOT_IN_ROOM') {
+      stopHttpPolling()
+      notify({
+        type: 'error',
+        code,
+        message: error.message,
+      })
+      return
+    }
+
+    notify({
+      type: 'connection-state',
+      state: 'disconnected',
+      message: 'Connect is reconnecting…',
+    })
+    scheduleReconnect()
+  } finally {
+    httpPollBusy = false
+  }
+}
+
+function startHttpPolling(roomCode) {
+  stopHttpPolling()
+  desiredRoomCode = roomCode
+  transportMode = 'http'
+
+  pollHttpRoom().catch(() => {})
+
+  httpPollTimer = window.setInterval(() => {
+    pollHttpRoom().catch(() => {})
+  }, 650)
 }
 
 function connectSocket() {
@@ -147,7 +278,7 @@ function connectSocket() {
         socketPromise = null
         nextSocket.close()
         reject(new Error(connectConfigMessage))
-      }, 20000)
+      }, 20_000)
 
       nextSocket.addEventListener('open', () => {
         if (settled) return
@@ -188,20 +319,58 @@ function connectSocket() {
   return socketPromise
 }
 
-function connectWithWarmup() {
-  const nativeOrHosted = Capacitor.isNativePlatform()
-  const url = getWebSocketUrl()
-  const isHosted = url === DEFAULT_CONNECT_URL
+async function createRoomHttp(playback = {}) {
+  await warmHostedService()
 
-  if (isHosted && nativeOrHosted) {
-    return warmHostedService().catch(() => {}).then(() => connectSocket())
+  const response = await requestHttp('/api/connect/rooms', {
+    method: 'POST',
+    body: JSON.stringify({
+      clientId: getClientId(),
+      playback,
+    }),
+  })
+
+  desiredRoomCode = response.roomCode
+  snapshots.delete(response.roomCode)
+
+  startHttpPolling(response.roomCode)
+  notify({ type: 'connection-state', state: 'connected' })
+
+  return {
+    roomCode: response.roomCode,
+    clientId: getClientId(),
+    role: response.role,
+    participantCount: response.participantCount || 1,
   }
-
-  return connectSocket()
 }
 
-function request(message, expectedType) {
-  return connectWithWarmup().then((activeSocket) => new Promise((resolve, reject) => {
+async function joinRoomHttp(roomCode) {
+  await warmHostedService()
+
+  const response = await requestHttp(
+    '/api/connect/rooms/' + encodeURIComponent(roomCode) + '/join',
+    {
+      method: 'POST',
+      body: JSON.stringify({ clientId: getClientId() }),
+    },
+  )
+
+  desiredRoomCode = response.roomCode
+  snapshots.delete(response.roomCode)
+
+  startHttpPolling(response.roomCode)
+  notify({ type: 'connection-state', state: 'connected' })
+
+  return {
+    roomCode: response.roomCode,
+    clientId: getClientId(),
+    role: response.role,
+    participantCount: response.participantCount || 2,
+  }
+}
+
+function requestSocket(message, expectedType) {
+  return connectSocket().then((activeSocket) => new Promise((resolve, reject) => {
     let finished = false
 
     const cleanup = () => listeners.delete(handleMessage)
@@ -243,13 +412,33 @@ function request(message, expectedType) {
       finished = true
       cleanup()
       reject(new Error(connectConfigMessage))
-    }, 12000)
+    }, 12_000)
   }))
 }
 
 export async function createRoom(playback = {}) {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      return await createRoomHttp(playback)
+    } catch (error) {
+      transportMode = 'ws'
+      try {
+        return await createRoomViaSocket(playback)
+      } catch {
+        throw error
+      }
+    }
+  }
+
+  return createRoomViaSocket(playback)
+}
+
+async function createRoomViaSocket(playback) {
+  stopHttpPolling()
+  transportMode = 'ws'
   desiredRoomCode = ''
-  const response = await request({ type: 'create-room', playback }, 'room-state')
+
+  const response = await requestSocket({ type: 'create-room', playback }, 'room-state')
   desiredRoomCode = response.roomCode
 
   return {
@@ -261,9 +450,30 @@ export async function createRoom(playback = {}) {
 }
 
 export async function joinRoom(roomCode) {
-  desiredRoomCode = ''
   const normalizedCode = String(roomCode || '').trim().toUpperCase()
-  const response = await request({ type: 'join-room', roomCode: normalizedCode }, 'room-state')
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      return await joinRoomHttp(normalizedCode)
+    } catch (error) {
+      transportMode = 'ws'
+      try {
+        return await joinRoomViaSocket(normalizedCode)
+      } catch {
+        throw error
+      }
+    }
+  }
+
+  return joinRoomViaSocket(normalizedCode)
+}
+
+async function joinRoomViaSocket(roomCode) {
+  stopHttpPolling()
+  transportMode = 'ws'
+  desiredRoomCode = ''
+
+  const response = await requestSocket({ type: 'join-room', roomCode }, 'room-state')
   desiredRoomCode = response.roomCode
 
   return {
@@ -285,6 +495,7 @@ export function subscribeToRoom(roomCode, onMessage) {
       || message.type === 'playback-state'
       || message.type === 'queue-state'
       || message.type === 'presence-state'
+      || message.type === 'presence-update'
       || message.type === 'chat-message'
     ) {
       onMessage(message)
@@ -310,28 +521,61 @@ export function subscribeToConnection(onState) {
 }
 
 export function updatePlaybackState(roomCode, playback, options = {}) {
-  return connectWithWarmup().then((activeSocket) => {
-    const command = options.command || 'playback'
-    const shouldCarrySeek = command === 'seek' || command === 'track'
+  const command = options.command || 'playback'
+  const payload = {
+    clientId: getClientId(),
+    activeVideoId: playback.currentTrack?.videoId || '',
+    activeVideoMetadata: playback.currentTrack || null,
+    isPlaying: Boolean(playback.isPlaying),
+    playbackPosition: Math.max(0, Number(playback.currentTime) || 0),
+    command,
+    seekPosition: (command === 'seek' || command === 'track') && Number.isFinite(options.seekPosition)
+      ? Math.max(0, Number(options.seekPosition))
+      : null,
+  }
 
+  if (transportMode === 'http') {
+    return requestHttp(
+      '/api/connect/rooms/' + encodeURIComponent(roomCode) + '/playback',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    )
+  }
+
+  return connectSocket().then((activeSocket) => {
     activeSocket.send(JSON.stringify({
       type: 'playback-update',
       roomCode,
       clientId: getClientId(),
-      activeVideoId: playback.currentTrack?.videoId || '',
-      activeVideoMetadata: playback.currentTrack || null,
-      isPlaying: Boolean(playback.isPlaying),
-      playbackPosition: Math.max(0, Number(playback.currentTime) || 0),
-      command,
-      seekId: shouldCarrySeek ? (crypto.randomUUID?.() || String(Date.now())) : null,
-      seekPosition: shouldCarrySeek && Number.isFinite(options.seekPosition)
-        ? Math.max(0, Number(options.seekPosition))
+      activeVideoId: payload.activeVideoId,
+      activeVideoMetadata: payload.activeVideoMetadata,
+      isPlaying: payload.isPlaying,
+      playbackPosition: payload.playbackPosition,
+      command: payload.command,
+      seekId: (command === 'seek' || command === 'track')
+        ? (crypto.randomUUID?.() || String(Date.now()))
         : null,
+      seekPosition: payload.seekPosition,
     }))
   })
 }
 
 export function updateQueue(roomCode, queue) {
+  if (transportMode === 'http') {
+    return requestHttp(
+      '/api/connect/rooms/' + encodeURIComponent(roomCode) + '/queue',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          clientId: getClientId(),
+          queue: Array.isArray(queue) ? queue : [],
+        }),
+      },
+    )
+  }
+
   return connectSocket().then((activeSocket) => {
     activeSocket.send(JSON.stringify({
       type: 'queue-update',
@@ -346,6 +590,19 @@ export function sendChatMessage(roomCode, text) {
   const message = String(text || '').trim().slice(0, 280)
   if (!message) return Promise.resolve()
 
+  if (transportMode === 'http') {
+    return requestHttp(
+      '/api/connect/rooms/' + encodeURIComponent(roomCode) + '/chat',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          clientId: getClientId(),
+          text: message,
+        }),
+      },
+    )
+  }
+
   return connectSocket().then((activeSocket) => {
     activeSocket.send(JSON.stringify({
       type: 'chat-message',
@@ -359,13 +616,22 @@ export function sendChatMessage(roomCode, text) {
 export function leaveRoom() {
   const previousRoomCode = desiredRoomCode
   desiredRoomCode = ''
+  stopHttpPolling()
 
   if (reconnectTimer) {
     window.clearTimeout(reconnectTimer)
     reconnectTimer = null
   }
 
-  if (previousRoomCode) snapshots.delete(previousRoomCode)
+  if (previousRoomCode && transportMode === 'http') {
+    requestHttp(
+      '/api/connect/rooms/' + encodeURIComponent(previousRoomCode) + '/leave',
+      {
+        method: 'POST',
+        body: JSON.stringify({ clientId: getClientId() }),
+      },
+    ).catch(() => {})
+  }
 
   if (socket?.readyState === WebSocket.OPEN) {
     try {
@@ -381,4 +647,5 @@ export function leaveRoom() {
   socket?.close()
   socket = null
   socketPromise = null
+  transportMode = 'ws'
 }
