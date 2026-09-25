@@ -512,7 +512,7 @@ export default function Player({
     if (!player) return
 
     const nextPlaying = !playingRef.current
-    const current = Number(player.getCurrentTime?.()) || playback.currentTime
+    const current = Number(player.getCurrentTime?.()) || playbackRef.current.currentTime
 
     onPlaybackChange({
       isPlaying: nextPlaying,
