@@ -135,16 +135,8 @@ function connectSocket() {
     let settled = false
     let timeoutId
 
-    const createWebSocket = () => {
-      try {
-        return new WebSocket(getWebSocketUrl())
-      } catch (error) {
-        throw error
-      }
-    }
-
     try {
-      const nextSocket = createWebSocket()
+      const nextSocket = new WebSocket(getWebSocketUrl())
 
       notify({ type: 'connection-state', state: 'connecting' })
 
@@ -155,7 +147,7 @@ function connectSocket() {
         socketPromise = null
         nextSocket.close()
         reject(new Error(connectConfigMessage))
-      }, 12000)
+      }, 20000)
 
       nextSocket.addEventListener('open', () => {
         if (settled) return
