@@ -292,7 +292,7 @@ export default function Player({
     }, { sync: false })
 
     const now = Date.now()
-    if (now - lastNativeProgressAtRef.current >= 900) {
+    if (now - lastNativeProgressAtRef.current >= 1500) {
       lastNativeProgressAtRef.current = now
       updateNativeMediaProgress(playingRef.current, duration, currentTime)
     }

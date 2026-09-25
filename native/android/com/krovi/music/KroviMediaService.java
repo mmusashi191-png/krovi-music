@@ -100,7 +100,8 @@ public class KroviMediaService extends Service {
             .putExtra(EXTRA_POSITION, position);
 
         if (Build.VERSION.SDK_INT >= 26) {
-            context.startForegroundService(intent);
+            if (playbackActive) context.startService(intent);
+            else context.startForegroundService(intent);
         } else {
             context.startService(intent);
         }
