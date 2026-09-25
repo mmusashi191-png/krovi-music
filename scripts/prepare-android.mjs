@@ -64,73 +64,89 @@ if (!manifest.includes('com.krovi.music.KroviMediaService')) {
     '',
   ].join('\n')
 
-  manifest = manifest.replace('    </application>', service + '    </application>')
+  manifest = manifest.replace(
+    '    </application>',
+    service + '    </application>',
+  )
 }
 
 writeFileSync(manifestPath, manifest)
 
 const valuesDir = join(androidDir, 'app', 'src', 'main', 'res', 'values')
-const v31Dir = join(androidDir, 'app', 'src', 'main', 'res', 'values-v31')
 const colorsPath = join(valuesDir, 'colors.xml')
 const stylesPath = join(valuesDir, 'styles.xml')
-const v31StylesPath = join(v31Dir, 'styles.xml')
 
 mkdirSync(valuesDir, { recursive: true })
-mkdirSync(v31Dir, { recursive: true })
 
-function ensureStartupColor() {
-  let colors = existsSync(colorsPath)
-    ? readFileSync(colorsPath, 'utf8')
-    : '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n</resources>\n'
+let colors = existsSync(colorsPath)
+  ? readFileSync(colorsPath, 'utf8')
+  : '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n</resources>\n'
 
-  if (!colors.includes('krovi_startup_background')) {
-    colors = colors.replace(
-      '</resources>',
-      '    <color name="krovi_startup_background">#24141C</color>\n</resources>',
-    )
-  }
-
-  writeFileSync(colorsPath, colors)
+if (!colors.includes('krovi_startup_background')) {
+  colors = colors.replace(
+    '</resources>',
+    '    <color name="krovi_startup_background">#24141C</color>\n</resources>',
+  )
 }
+writeFileSync(colorsPath, colors)
 
 function patchLaunchTheme(stylePath, includeSplashBackground) {
   if (!existsSync(stylePath)) return
 
   let styles = readFileSync(stylePath, 'utf8')
+  const openTag = '<style name="AppTheme.NoActionBarLaunch"'
+  const start = styles.indexOf(openTag)
 
-  const pattern = /(<style name="AppTheme\\.NoActionBarLaunch"[^>]*>)([\\s\\S]*?)(<\\/style>)/m
+  if (start < 0) return
 
-  styles = styles.replace(pattern, (_match, open, body, close) => {
-    let nextBody = body
+  const openEnd = styles.indexOf('>', start)
+  const close = styles.indexOf('</style>', openEnd)
 
-    if (nextBody.includes('android:windowBackground')) {
-      nextBody = nextBody.replace(
-        /<item name="android:windowBackground">[^<]*<\\/item>/,
-        '        <item name="android:windowBackground">@color/krovi_startup_background</item>',
-      )
-    } else {
-      nextBody += '        <item name="android:windowBackground">@color/krovi_startup_background</item>\n'
+  if (openEnd < 0 || close < 0) return
+
+  let body = styles.slice(openEnd + 1, close)
+
+  const backgroundItem = '<item name="android:windowBackground">'
+  const backgroundStart = body.indexOf(backgroundItem)
+
+  if (backgroundStart >= 0) {
+    const itemEnd = body.indexOf('</item>', backgroundStart)
+    if (itemEnd >= 0) {
+      body =
+        body.slice(0, backgroundStart) +
+        '        <item name="android:windowBackground">@color/krovi_startup_background</item>\n' +
+        body.slice(itemEnd + '</item>'.length)
     }
+  } else {
+    body += '\n        <item name="android:windowBackground">@color/krovi_startup_background</item>\n'
+  }
 
-    if (includeSplashBackground) {
-      if (nextBody.includes('windowSplashScreenBackground')) {
-        nextBody = nextBody.replace(
-          /<item name="windowSplashScreenBackground">[^<]*<\\/item>/,
-          '        <item name="windowSplashScreenBackground">@color/krovi_startup_background</item>',
-        )
-      } else {
-        nextBody += '        <item name="windowSplashScreenBackground">@color/krovi_startup_background</item>\n'
+  if (includeSplashBackground) {
+    const splashItem = '<item name="windowSplashScreenBackground">'
+    const splashStart = body.indexOf(splashItem)
+
+    if (splashStart >= 0) {
+      const itemEnd = body.indexOf('</item>', splashStart)
+      if (itemEnd >= 0) {
+        body =
+          body.slice(0, splashStart) +
+          '        <item name="windowSplashScreenBackground">@color/krovi_startup_background</item>\n' +
+          body.slice(itemEnd + '</item>'.length)
       }
+    } else {
+      body += '        <item name="windowSplashScreenBackground">@color/krovi_startup_background</item>\n'
     }
+  }
 
-    return open + nextBody + close
-  })
-
+  styles = styles.slice(0, openEnd + 1) + body + styles.slice(close)
   writeFileSync(stylePath, styles)
 }
 
-ensureStartupColor()
 patchLaunchTheme(stylesPath, false)
+
+const v31Dir = join(androidDir, 'app', 'src', 'main', 'res', 'values-v31')
+const v31StylesPath = join(v31Dir, 'styles.xml')
+mkdirSync(v31Dir, { recursive: true })
 patchLaunchTheme(v31StylesPath, true)
 
 console.log('Krovi Android media service and launch theme prepared.')

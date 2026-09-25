@@ -46,17 +46,6 @@
   --shadow-strong: 0 28px 78px rgb(0 0 0 / 43%);
 }
 
-html,
-body,
-button,
-input,
-textarea {
-  transition:
-    background-color 380ms ease,
-    color 380ms ease,
-    border-color 380ms ease,
-    box-shadow 380ms ease;
-}
 
 html {
   min-height: 100%;
@@ -191,7 +180,7 @@ button:disabled {
   box-shadow: 0 10px 26px color-mix(in srgb, var(--accent) 24%, transparent);
   font: italic 700 20px/1 Georgia, serif;
   transform: rotate(-7deg);
-  transition: transform 400ms var(--ease-spring);
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1);
 }
 
 .brand-button:hover .brand-mark {
@@ -239,27 +228,10 @@ button:disabled {
   overflow: hidden;
 }
 
-.theme-toggle::before {
-  content: "";
-  position: absolute;
-  inset: 5px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  border-radius: 9px;
-  transform: scale(.45) rotate(-18deg);
-  opacity: 0;
-  transition: transform 420ms var(--ease-spring), opacity 260ms ease;
-}
-
-.theme-toggle:hover::before,
-.theme-toggle:focus-visible::before {
-  transform: scale(1) rotate(0deg);
-  opacity: 1;
-}
-
 .theme-toggle svg {
   position: relative;
   z-index: 1;
-  transition: transform 520ms var(--ease-spring);
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1);
 }
 
 .theme-toggle:active svg {
@@ -307,11 +279,11 @@ button:disabled {
 }
 
 .page-enter {
-  animation: pageEnter 720ms var(--ease-spring) both;
+  animation: pageEnter 280ms cubic-bezier(.2,.8,.2,1) both;
 }
 
 .section-reveal {
-  animation: sectionReveal 700ms var(--ease-spring) var(--delay, 0ms) both;
+  animation: sectionReveal 340ms cubic-bezier(.2,.8,.2,1) var(--delay, 0ms) both;
 }
 
 .eyebrow {
@@ -677,7 +649,7 @@ button:disabled {
   text-align: left;
   background: transparent;
   border-bottom: 1px solid var(--line);
-  animation: sectionReveal 650ms var(--ease-spring) var(--delay, 0ms) both;
+  animation: sectionReveal 320ms cubic-bezier(.2,.8,.2,1) var(--delay, 0ms) both;
   transition: padding 220ms var(--ease-out), background-color 220ms ease;
 }
 
@@ -2504,7 +2476,7 @@ input[type="range"] {
   place-items: center;
   overflow: hidden;
   color: #fdf8f8;
-  background: #24141c;
+  background: var(--page-bg);
 }
 
 .startup-screen::before {
@@ -2618,7 +2590,7 @@ input[type="range"] {
 
 .startup-screen.is-exiting {
   pointer-events: none;
-  animation: startupExit 490ms cubic-bezier(.2,.8,.2,1) forwards;
+  animation: startupExit 560ms cubic-bezier(.2,.8,.2,1) forwards;
   will-change: opacity, transform;
 }
 
@@ -2628,10 +2600,9 @@ input[type="range"] {
 }
 
 @keyframes themeCircle {
-  0% { transform: scale(0); opacity: 1; }
-  72% { transform: scale(1); opacity: 1; }
-  88% { transform: scale(1.01); opacity: .88; }
-  100% { transform: scale(1.02); opacity: 0; }
+  0% { transform: translate(-50%, -50%) scale(0); }
+  82% { transform: translate(-50%, -50%) scale(1); }
+  100% { transform: translate(-50%, -50%) scale(1); }
 }
 
 @keyframes activeNavPop {
@@ -2757,35 +2728,32 @@ input[type="range"] {
 
 @keyframes startupExit {
   from { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-  55% { opacity: 1; transform: translate3d(0, -7px, 0) scale(1.01); }
-  to { opacity: 0; transform: translate3d(0, -22px, 0) scale(1.025); }
+  70% { opacity: .92; transform: translate3d(0, -5px, 0) scale(1.005); }
+  to { opacity: 0; transform: translate3d(0, -10px, 0) scale(1.01); }
 }
 
 .theme-transition {
   position: fixed;
-  top: -3vmax;
-  right: -3vmax;
-  width: 170vmax;
-  height: 170vmax;
+  left: var(--theme-x);
+  top: var(--theme-y);
+  width: 150vmax;
+  height: 150vmax;
   z-index: 120;
   pointer-events: none;
   border-radius: 50%;
-  transform: scale(0);
-  transform-origin: 100% 0%;
-  will-change: transform, opacity;
-  animation: themeCircle 680ms cubic-bezier(.2,.8,.2,1) both;
+  transform: translate(-50%, -50%) scale(0);
+  transform-origin: center;
+  will-change: transform;
+  background: var(--page-bg);
+  animation: themeCircle 680ms cubic-bezier(.2,.78,.2,1) forwards;
 }
 
 .theme-transition-rose {
-  background:
-    radial-gradient(circle at 34% 30%, rgb(255 248 244 / 92%), transparent 28%),
-    #f3e9e4;
+  background: #f3e9e4;
 }
 
 .theme-transition-verdant {
-  background:
-    radial-gradient(circle at 34% 30%, rgb(239 224 199 / 14%), transparent 28%),
-    #1c211d;
+  background: #1c211d;
 }
 
 [data-theme="rose"] .app-shell::before {

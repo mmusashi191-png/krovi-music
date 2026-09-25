@@ -558,14 +558,29 @@ function App() {
 
   const toggleTheme = useCallback(() => {
     const nextTheme = theme === 'rose' ? 'verdant' : 'rose'
-    setThemeTransition(nextTheme)
+    const button = document.querySelector('.theme-toggle')
+    const rect = button?.getBoundingClientRect()
+
+    const x = rect ? rect.left + rect.width / 2 : window.innerWidth - 36
+    const y = rect ? rect.top + rect.height / 2 : 32
+
+    setThemeTransition({ theme: nextTheme, x, y })
     window.requestAnimationFrame(() => setTheme(nextTheme))
-    window.setTimeout(() => setThemeTransition(null), 820)
+    window.setTimeout(() => setThemeTransition(null), 720)
   }, [theme])
 
   return (
     <div className="app-shell" data-theme={theme}>
-      {themeTransition && <div className={'theme-transition theme-transition-' + themeTransition} aria-hidden="true" />}
+      {themeTransition && (
+        <div
+          className={'theme-transition theme-transition-' + themeTransition.theme}
+          style={{
+            '--theme-x': themeTransition.x + 'px',
+            '--theme-y': themeTransition.y + 'px',
+          }}
+          aria-hidden="true"
+        />
+      )}
       <header className="topbar">
         <button type="button" className="brand-button" onClick={() => setView('home')} aria-label="Krovi home">
           <span className="brand-mark">k</span>

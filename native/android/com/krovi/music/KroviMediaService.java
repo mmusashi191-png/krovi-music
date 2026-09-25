@@ -7,27 +7,38 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
-import android.media.AudioManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.os.SystemClock;
+
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class KroviMediaService extends Service {
     public static final String ACTION_START = "com.krovi.music.media.START";
     public static final String ACTION_UPDATE = "com.krovi.music.media.UPDATE";
+    public static final String ACTION_PROGRESS = "com.krovi.music.media.PROGRESS";
     public static final String ACTION_STOP = "com.krovi.music.media.STOP";
     public static final String ACTION_PLAY_PAUSE = "com.krovi.music.media.PLAY_PAUSE";
     public static final String ACTION_PREVIOUS = "com.krovi.music.media.PREVIOUS";
     public static final String ACTION_NEXT = "com.krovi.music.media.NEXT";
     public static final String ACTION_COMMAND = "com.krovi.music.media.COMMAND";
+
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_ARTIST = "artist";
     public static final String EXTRA_PLAYING = "playing";
+    public static final String EXTRA_DURATION = "duration";
+    public static final String EXTRA_POSITION = "position";
+    public static final String EXTRA_ARTWORK = "artwork";
     public static final String EXTRA_COMMAND = "command";
 
     private static final int NOTIFICATION_ID = 61042;
@@ -36,23 +47,52 @@ public class KroviMediaService extends Service {
     private static volatile boolean playbackActive = false;
 
     private MediaSession mediaSession;
-    private AudioManager audioManager;
-    private AudioFocusRequest audioFocusRequest;
     private PowerManager.WakeLock wakeLock;
+    private final ExecutorService artworkExecutor = Executors.newSingleThreadExecutor();
+
     private String title = "Krovi Music";
     private String artist = "YouTube";
+    private String artworkUrl = "";
+    private Bitmap artworkBitmap;
+    private double durationSeconds;
+    private double positionSeconds;
     private boolean playing;
 
     public static boolean isPlaybackActive() {
         return playbackActive;
     }
 
-    public static void update(Context context, String title, String artist, boolean playing) {
+    public static void update(
+        Context context,
+        String title,
+        String artist,
+        boolean playing,
+        double duration,
+        double position,
+        String artwork
+    ) {
         Intent intent = new Intent(context, KroviMediaService.class)
             .setAction(ACTION_UPDATE)
             .putExtra(EXTRA_TITLE, title)
             .putExtra(EXTRA_ARTIST, artist)
-            .putExtra(EXTRA_PLAYING, playing);
+            .putExtra(EXTRA_PLAYING, playing)
+            .putExtra(EXTRA_DURATION, duration)
+            .putExtra(EXTRA_POSITION, position)
+            .putExtra(EXTRA_ARTWORK, artwork);
+
+        if (Build.VERSION.SDK_INT >= 26) {
+            context.startForegroundService(intent);
+        } else {
+            context.startService(intent);
+        }
+    }
+
+    public static void updatePlayback(Context context, boolean playing, double duration, double position) {
+        Intent intent = new Intent(context, KroviMediaService.class)
+            .setAction(ACTION_PROGRESS)
+            .putExtra(EXTRA_PLAYING, playing)
+            .putExtra(EXTRA_DURATION, duration)
+            .putExtra(EXTRA_POSITION, position);
 
         if (Build.VERSION.SDK_INT >= 26) {
             context.startForegroundService(intent);
@@ -70,19 +110,11 @@ public class KroviMediaService extends Service {
         super.onCreate();
         createNotificationChannel();
 
-        audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
-
         mediaSession = new MediaSession(this, "KroviMusic");
-        mediaSession.setFlags(
-            MediaSession.FLAG_HANDLES_MEDIA_BUTTONS |
-            MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
-        );
         mediaSession.setCallback(new MediaSession.Callback() {
             @Override
             public void onPlay() {
-                if (requestAudioFocus()) {
-                    sendCommand("play");
-                }
+                sendCommand("play");
             }
 
             @Override
@@ -105,7 +137,6 @@ public class KroviMediaService extends Service {
                 sendCommand("pause");
             }
         });
-
         mediaSession.setActive(true);
     }
 
@@ -114,29 +145,44 @@ public class KroviMediaService extends Service {
         String action = intent != null ? intent.getAction() : ACTION_START;
 
         if (ACTION_STOP.equals(action)) {
-            stopNotification();
+            stopPlaybackService();
             return START_NOT_STICKY;
+        }
+
+        if (ACTION_PROGRESS.equals(action)) {
+            playing = intent.getBooleanExtra(EXTRA_PLAYING, false);
+            durationSeconds = Math.max(0, intent.getDoubleExtra(EXTRA_DURATION, 0));
+            positionSeconds = Math.max(0, intent.getDoubleExtra(EXTRA_POSITION, 0));
+            playbackActive = true;
+
+            if (playing) ensureWakeLock();
+            else releaseWakeLock();
+
+            publishPlaybackState();
+            startNotification();
+            return START_STICKY;
         }
 
         if (ACTION_UPDATE.equals(action)) {
             String nextTitle = intent.getStringExtra(EXTRA_TITLE);
             String nextArtist = intent.getStringExtra(EXTRA_ARTIST);
+            String nextArtwork = intent.getStringExtra(EXTRA_ARTWORK);
 
             if (nextTitle != null && !nextTitle.isBlank()) title = nextTitle;
             if (nextArtist != null && !nextArtist.isBlank()) artist = nextArtist;
+            if (nextArtwork != null) artworkUrl = nextArtwork;
 
             playing = intent.getBooleanExtra(EXTRA_PLAYING, false);
+            durationSeconds = Math.max(0, intent.getDoubleExtra(EXTRA_DURATION, 0));
+            positionSeconds = Math.max(0, intent.getDoubleExtra(EXTRA_POSITION, 0));
             playbackActive = true;
 
-            if (playing) {
-                requestAudioFocus();
-                ensureWakeLock();
-            } else {
-                releaseWakeLock();
-            }
+            if (playing) ensureWakeLock();
+            else releaseWakeLock();
 
             publishPlaybackState();
             startNotification();
+            loadArtworkIfNeeded();
             return START_STICKY;
         }
 
@@ -144,12 +190,8 @@ public class KroviMediaService extends Service {
             playing = !playing;
             playbackActive = true;
 
-            if (playing) {
-                requestAudioFocus();
-                ensureWakeLock();
-            } else {
-                releaseWakeLock();
-            }
+            if (playing) ensureWakeLock();
+            else releaseWakeLock();
 
             publishPlaybackState();
             startNotification();
@@ -164,69 +206,11 @@ public class KroviMediaService extends Service {
 
         playing = true;
         playbackActive = true;
-        requestAudioFocus();
         ensureWakeLock();
         publishPlaybackState();
         startNotification();
 
         return START_STICKY;
-    }
-
-    private boolean requestAudioFocus() {
-        if (audioManager == null) return true;
-
-        if (Build.VERSION.SDK_INT >= 26) {
-            if (audioFocusRequest == null) {
-                AudioAttributes attributes = new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build();
-
-                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                    .setAudioAttributes(attributes)
-                    .setOnAudioFocusChangeListener(change -> {
-                        if (change == AudioManager.AUDIOFOCUS_LOSS ||
-                            change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                            pauseFromAudioFocus();
-                        }
-                    })
-                    .build();
-            }
-
-            return audioManager.requestAudioFocus(audioFocusRequest)
-                == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
-        }
-
-        return audioManager.requestAudioFocus(
-            change -> {
-                if (change == AudioManager.AUDIOFOCUS_LOSS ||
-                    change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                    pauseFromAudioFocus();
-                }
-            },
-            AudioManager.STREAM_MUSIC,
-            AudioManager.AUDIOFOCUS_GAIN
-        ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
-    }
-
-    private void pauseFromAudioFocus() {
-        if (!playing) return;
-
-        playing = false;
-        releaseWakeLock();
-        publishPlaybackState();
-        startNotification();
-        sendCommand("pause");
-    }
-
-    private void abandonAudioFocus() {
-        if (audioManager == null) return;
-
-        if (Build.VERSION.SDK_INT >= 26 && audioFocusRequest != null) {
-            audioManager.abandonAudioFocusRequest(audioFocusRequest);
-        } else {
-            audioManager.abandonAudioFocus(null);
-        }
     }
 
     private void sendCommand(String command) {
@@ -296,12 +280,42 @@ public class KroviMediaService extends Service {
                 servicePendingIntent(ACTION_NEXT)
             );
 
+        if (artworkBitmap != null) {
+            builder.setLargeIcon(artworkBitmap);
+        }
+
         return builder.build();
     }
 
-    private PendingIntent servicePendingIntent(String action) {
-        Intent intent = new Intent(this, KroviMediaService.class).setAction(action);
-        return PendingIntent.getService(this, action.hashCode(), intent, pendingIntentFlags());
+    private void loadArtworkIfNeeded() {
+        final String requestedUrl = artworkUrl;
+
+        if (requestedUrl == null || requestedUrl.isBlank()) return;
+        if (requestedUrl.equals(artworkUrl) && artworkBitmap != null) return;
+
+        artworkExecutor.execute(() -> {
+            Bitmap bitmap = null;
+
+            try {
+                HttpURLConnection connection = (HttpURLConnection) new URL(requestedUrl).openConnection();
+                connection.setConnectTimeout(5000);
+                connection.setReadTimeout(5000);
+                connection.setInstanceFollowRedirects(true);
+
+                try (InputStream input = connection.getInputStream()) {
+                    bitmap = BitmapFactory.decodeStream(input);
+                } finally {
+                    connection.disconnect();
+                }
+            } catch (Exception ignored) {
+                // Artwork is optional.
+            }
+
+            if (bitmap != null && requestedUrl.equals(artworkUrl)) {
+                artworkBitmap = bitmap;
+                startNotification();
+            }
+        });
     }
 
     private int pendingIntentFlags() {
@@ -316,33 +330,42 @@ public class KroviMediaService extends Service {
             PlaybackState.ACTION_PAUSE |
             PlaybackState.ACTION_PLAY_PAUSE |
             PlaybackState.ACTION_SKIP_TO_PREVIOUS |
-            PlaybackState.ACTION_SKIP_TO_NEXT;
+            PlaybackState.ACTION_SKIP_TO_NEXT |
+            PlaybackState.ACTION_SEEK_TO;
 
-        mediaSession.setMetadata(
-            new MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
-                .putString(MediaMetadata.METADATA_KEY_ALBUM, "Krovi Music")
-                .build()
-        );
+        long positionMs = Math.max(0L, Math.round(positionSeconds * 1000.0));
+
+        MediaMetadata.Builder metadata = new MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, title)
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
+            .putString(MediaMetadata.METADATA_KEY_ALBUM, "Krovi Music")
+            .putLong(MediaMetadata.METADATA_KEY_DURATION, Math.max(0L, Math.round(durationSeconds * 1000.0)));
+
+        if (artworkBitmap != null) {
+            metadata.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, artworkBitmap);
+            metadata.putBitmap(MediaMetadata.METADATA_KEY_ART, artworkBitmap);
+        }
+
+        mediaSession.setMetadata(metadata.build());
 
         mediaSession.setPlaybackState(
             new PlaybackState.Builder()
                 .setActions(actions)
                 .setState(
                     playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED,
-                    0L,
-                    playing ? 1f : 0f
+                    positionMs,
+                    playing ? 1f : 0f,
+                    SystemClock.elapsedRealtime()
                 )
+                .setBufferedPosition(positionMs)
                 .build()
         );
     }
 
-    private void stopNotification() {
+    private void stopPlaybackService() {
         playing = false;
         playbackActive = false;
         releaseWakeLock();
-        abandonAudioFocus();
 
         if (mediaSession != null) {
             mediaSession.setActive(false);
@@ -397,7 +420,6 @@ public class KroviMediaService extends Service {
     @Override
     public void onTaskRemoved(Intent rootIntent) {
         if (playbackActive && playing) {
-            requestAudioFocus();
             ensureWakeLock();
             startNotification();
         }
@@ -409,7 +431,7 @@ public class KroviMediaService extends Service {
     public void onDestroy() {
         playbackActive = false;
         releaseWakeLock();
-        abandonAudioFocus();
+        artworkExecutor.shutdownNow();
 
         if (mediaSession != null) {
             mediaSession.release();

@@ -10,9 +10,11 @@ let desiredRoomCode = ''
 let reconnectTimer = null
 let httpPollTimer = null
 let httpPollBusy = false
+let httpConnected = false
 let transportMode = 'ws'
 const listeners = new Set()
 const snapshots = new Map()
+const CONNECT_HTTP_TIMEOUT_MS = 45_000
 
 export const connectConfigMessage = 'Connect is unavailable. Check the network connection and try again.'
 
@@ -133,7 +135,7 @@ function attachSocketEvents(nextSocket) {
 
 async function requestHttp(path, options = {}) {
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), 10_000)
+  const timeout = window.setTimeout(() => controller.abort(), CONNECT_HTTP_TIMEOUT_MS)
 
   try {
     const response = await fetch(getHttpBaseUrl() + path, {
@@ -150,28 +152,12 @@ async function requestHttp(path, options = {}) {
 
     if (!response.ok) {
       const error = new Error(payload.message || payload.error || connectConfigMessage)
-      error.code = payload.code || 'CONNECT_HTTP_ERROR'
+      error.code = payload.code || (response.status === 404 ? 'CONNECT_ENDPOINT_MISSING' : 'CONNECT_HTTP_ERROR')
       error.status = response.status
       throw error
     }
 
     return payload
-  } finally {
-    window.clearTimeout(timeout)
-  }
-}
-
-async function warmHostedService() {
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), 8_000)
-
-  try {
-    const response = await fetch(getHttpBaseUrl() + '/health', {
-      cache: 'no-store',
-      signal: controller.signal,
-    })
-
-    if (!response.ok) throw new Error('Hosted service unavailable.')
   } finally {
     window.clearTimeout(timeout)
   }
@@ -184,6 +170,7 @@ function stopHttpPolling() {
   }
 
   httpPollBusy = false
+  httpConnected = false
 }
 
 async function pollHttpRoom() {
@@ -221,7 +208,10 @@ async function pollHttpRoom() {
       notify(snapshot)
     }
 
-    notify({ type: 'connection-state', state: 'connected' })
+    if (!httpConnected) {
+      httpConnected = true
+      notify({ type: 'connection-state', state: 'connected' })
+    }
   } catch (error) {
     const code = error?.code
 
@@ -235,11 +225,14 @@ async function pollHttpRoom() {
       return
     }
 
-    notify({
-      type: 'connection-state',
-      state: 'disconnected',
-      message: 'Connect is reconnecting…',
-    })
+    if (httpConnected) {
+      httpConnected = false
+      notify({
+        type: 'connection-state',
+        state: 'disconnected',
+        message: 'Connect is reconnecting…',
+      })
+    }
     scheduleReconnect()
   } finally {
     httpPollBusy = false
@@ -255,7 +248,7 @@ function startHttpPolling(roomCode) {
 
   httpPollTimer = window.setInterval(() => {
     pollHttpRoom().catch(() => {})
-  }, 650)
+  }, 1000)
 }
 
 function connectSocket() {
@@ -320,8 +313,6 @@ function connectSocket() {
 }
 
 async function createRoomHttp(playback = {}) {
-  await warmHostedService()
-
   const response = await requestHttp('/api/connect/rooms', {
     method: 'POST',
     body: JSON.stringify({
@@ -334,6 +325,7 @@ async function createRoomHttp(playback = {}) {
   snapshots.delete(response.roomCode)
 
   startHttpPolling(response.roomCode)
+  httpConnected = true
   notify({ type: 'connection-state', state: 'connected' })
 
   return {
@@ -425,6 +417,9 @@ export async function createRoom(playback = {}) {
       try {
         return await createRoomViaSocket(playback)
       } catch {
+        if (error?.code === 'CONNECT_ENDPOINT_MISSING') {
+          throw new Error('Connect server is not deployed with the current API yet.')
+        }
         throw error
       }
     }
@@ -460,6 +455,9 @@ export async function joinRoom(roomCode) {
       try {
         return await joinRoomViaSocket(normalizedCode)
       } catch {
+        if (error?.code === 'CONNECT_ENDPOINT_MISSING') {
+          throw new Error('Connect server is not deployed with the current API yet.')
+        }
         throw error
       }
     }

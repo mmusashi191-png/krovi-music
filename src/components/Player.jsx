@@ -23,6 +23,7 @@ import {
   requestNativeMediaPermission,
   stopNativeMedia,
   updateNativeMedia,
+  updateNativeMediaProgress,
 } from '../services/nativeMedia.js'
 
 let youtubeApiPromise
@@ -172,6 +173,7 @@ export default function Player({
   const dragMovedRef = useRef(false)
   const dragCleanupRef = useRef(null)
   const nativeNotificationRequestedRef = useRef(false)
+  const lastNativeProgressAtRef = useRef(0)
 
   const track = playback.currentTrack
   const isPlaying = playback.isPlaying
@@ -281,10 +283,19 @@ export default function Player({
     const player = playerRef.current
     if (!player?.getCurrentTime) return
 
+    const currentTime = Number(player.getCurrentTime()) || 0
+    const duration = Number(player.getDuration?.()) || 0
+
     onPlaybackChange({
-      currentTime: Number(player.getCurrentTime()) || 0,
-      duration: Number(player.getDuration?.()) || 0,
+      currentTime,
+      duration,
     }, { sync: false })
+
+    const now = Date.now()
+    if (now - lastNativeProgressAtRef.current >= 900) {
+      lastNativeProgressAtRef.current = now
+      updateNativeMediaProgress(playingRef.current, duration, currentTime)
+    }
   }, [onPlaybackChange])
 
   const startProgress = useCallback(() => {
@@ -586,8 +597,8 @@ export default function Player({
       requestNativeMediaPermission()
     }
 
-    updateNativeMedia(track, isPlaying)
-  }, [isPlaying, track])
+    updateNativeMedia(track, isPlaying, duration, playback.currentTime)
+  }, [isPlaying, track, duration, playback.currentTime])
 
   useEffect(() => {
     const handleNativeCommand = (event) => {

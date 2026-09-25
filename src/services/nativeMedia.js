@@ -10,7 +10,7 @@ export function requestNativeMediaPermission() {
   }
 }
 
-export function updateNativeMedia(track, isPlaying) {
+export function updateNativeMedia(track, isPlaying, duration = 0, currentTime = 0) {
   if (!track) return
 
   try {
@@ -18,6 +18,21 @@ export function updateNativeMedia(track, isPlaying) {
       String(track.title || 'Krovi Music'),
       String(track.artist || 'YouTube'),
       Boolean(isPlaying),
+      Number(duration) || 0,
+      Number(currentTime) || 0,
+      String(track.thumbnail || ''),
+    )
+  } catch {
+    // Keep web playback independent from native notification support.
+  }
+}
+
+export function updateNativeMediaProgress(isPlaying, duration = 0, currentTime = 0) {
+  try {
+    bridge()?.updatePlayback?.(
+      Boolean(isPlaying),
+      Number(duration) || 0,
+      Number(currentTime) || 0,
     )
   } catch {
     // Keep web playback independent from native notification support.
