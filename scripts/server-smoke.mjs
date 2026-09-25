@@ -170,6 +170,48 @@ async function main() {
 
     await nextMessage(clientB, (message) => message.type === 'left-room')
 
+    const restClientId = 'smoke-rest-' + Date.now()
+
+    const createRest = await fetch('http://127.0.0.1:' + port + '/api/connect/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId: restClientId,
+        playback: {
+          currentTrack: {
+            videoId: 'rest-smoke-video',
+            title: 'REST Smoke Test',
+            artist: 'Krovi',
+          },
+          queue: [],
+          isPlaying: true,
+          currentTime: 5,
+        },
+      }),
+    })
+
+    assert.equal(createRest.ok, true)
+    const restRoom = await createRest.json()
+    assert.match(restRoom.roomCode, /^[A-Z0-9]{6}$/)
+
+    const restStateResponse = await fetch(
+      'http://127.0.0.1:' + port + '/api/connect/rooms/' + restRoom.roomCode +
+      '/state?clientId=' + encodeURIComponent(restClientId),
+    )
+    assert.equal(restStateResponse.ok, true)
+    const restState = await restStateResponse.json()
+    assert.equal(restState.activeVideoId, 'rest-smoke-video')
+
+    const restLeave = await fetch(
+      'http://127.0.0.1:' + port + '/api/connect/rooms/' + restRoom.roomCode + '/leave',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: restClientId }),
+      },
+    )
+    assert.equal(restLeave.ok, true)
+
     console.log('Krovi server smoke test passed.')
   } finally {
     clientA?.close()

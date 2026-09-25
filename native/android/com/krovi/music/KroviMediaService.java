@@ -7,6 +7,9 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
@@ -30,11 +33,19 @@ public class KroviMediaService extends Service {
     private static final int NOTIFICATION_ID = 61042;
     private static final String CHANNEL_ID = "krovi-playback";
 
+    private static volatile boolean playbackActive = false;
+
     private MediaSession mediaSession;
+    private AudioManager audioManager;
+    private AudioFocusRequest audioFocusRequest;
     private PowerManager.WakeLock wakeLock;
     private String title = "Krovi Music";
     private String artist = "YouTube";
     private boolean playing;
+
+    public static boolean isPlaybackActive() {
+        return playbackActive;
+    }
 
     public static void update(Context context, String title, String artist, boolean playing) {
         Intent intent = new Intent(context, KroviMediaService.class)
@@ -59,11 +70,19 @@ public class KroviMediaService extends Service {
         super.onCreate();
         createNotificationChannel();
 
+        audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+
         mediaSession = new MediaSession(this, "KroviMusic");
+        mediaSession.setFlags(
+            MediaSession.FLAG_HANDLES_MEDIA_BUTTONS |
+            MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
+        );
         mediaSession.setCallback(new MediaSession.Callback() {
             @Override
             public void onPlay() {
-                sendCommand("play");
+                if (requestAudioFocus()) {
+                    sendCommand("play");
+                }
             }
 
             @Override
@@ -107,8 +126,10 @@ public class KroviMediaService extends Service {
             if (nextArtist != null && !nextArtist.isBlank()) artist = nextArtist;
 
             playing = intent.getBooleanExtra(EXTRA_PLAYING, false);
+            playbackActive = true;
 
             if (playing) {
+                requestAudioFocus();
                 ensureWakeLock();
             } else {
                 releaseWakeLock();
@@ -121,8 +142,10 @@ public class KroviMediaService extends Service {
 
         if (ACTION_PLAY_PAUSE.equals(action)) {
             playing = !playing;
+            playbackActive = true;
 
             if (playing) {
+                requestAudioFocus();
                 ensureWakeLock();
             } else {
                 releaseWakeLock();
@@ -140,11 +163,70 @@ public class KroviMediaService extends Service {
         }
 
         playing = true;
+        playbackActive = true;
+        requestAudioFocus();
         ensureWakeLock();
         publishPlaybackState();
         startNotification();
 
         return START_STICKY;
+    }
+
+    private boolean requestAudioFocus() {
+        if (audioManager == null) return true;
+
+        if (Build.VERSION.SDK_INT >= 26) {
+            if (audioFocusRequest == null) {
+                AudioAttributes attributes = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build();
+
+                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(attributes)
+                    .setOnAudioFocusChangeListener(change -> {
+                        if (change == AudioManager.AUDIOFOCUS_LOSS ||
+                            change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                            pauseFromAudioFocus();
+                        }
+                    })
+                    .build();
+            }
+
+            return audioManager.requestAudioFocus(audioFocusRequest)
+                == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+        }
+
+        return audioManager.requestAudioFocus(
+            change -> {
+                if (change == AudioManager.AUDIOFOCUS_LOSS ||
+                    change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                    pauseFromAudioFocus();
+                }
+            },
+            AudioManager.STREAM_MUSIC,
+            AudioManager.AUDIOFOCUS_GAIN
+        ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+    }
+
+    private void pauseFromAudioFocus() {
+        if (!playing) return;
+
+        playing = false;
+        releaseWakeLock();
+        publishPlaybackState();
+        startNotification();
+        sendCommand("pause");
+    }
+
+    private void abandonAudioFocus() {
+        if (audioManager == null) return;
+
+        if (Build.VERSION.SDK_INT >= 26 && audioFocusRequest != null) {
+            audioManager.abandonAudioFocusRequest(audioFocusRequest);
+        } else {
+            audioManager.abandonAudioFocus(null);
+        }
     }
 
     private void sendCommand(String command) {
@@ -258,7 +340,9 @@ public class KroviMediaService extends Service {
 
     private void stopNotification() {
         playing = false;
+        playbackActive = false;
         releaseWakeLock();
+        abandonAudioFocus();
 
         if (mediaSession != null) {
             mediaSession.setActive(false);
@@ -312,7 +396,8 @@ public class KroviMediaService extends Service {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        if (playing) {
+        if (playbackActive && playing) {
+            requestAudioFocus();
             ensureWakeLock();
             startNotification();
         }
@@ -322,7 +407,9 @@ public class KroviMediaService extends Service {
 
     @Override
     public void onDestroy() {
+        playbackActive = false;
         releaseWakeLock();
+        abandonAudioFocus();
 
         if (mediaSession != null) {
             mediaSession.release();

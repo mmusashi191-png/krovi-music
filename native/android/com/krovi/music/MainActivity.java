@@ -6,10 +6,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
+import android.webkit.WebSettings;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -24,6 +26,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().setStatusBarColor(Color.parseColor("#24141C"));
         registerMediaCommandReceiver();
         attachMediaBridge();
     }
@@ -32,6 +35,39 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         attachMediaBridge();
+
+        if (webView != null) {
+            webView.onResume();
+            webView.resumeTimers();
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+
+        if (KroviMediaService.isPlaybackActive() && webView != null) {
+            webView.post(() -> {
+                if (KroviMediaService.isPlaybackActive()) {
+                    webView.onResume();
+                    webView.resumeTimers();
+                }
+            });
+        }
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+
+        if (KroviMediaService.isPlaybackActive() && webView != null) {
+            webView.post(() -> {
+                if (KroviMediaService.isPlaybackActive()) {
+                    webView.onResume();
+                    webView.resumeTimers();
+                }
+            });
+        }
     }
 
     private void attachMediaBridge() {
@@ -40,7 +76,15 @@ public class MainActivity extends BridgeActivity {
         webView = getBridge().getWebView();
         if (webView == null) return;
 
-        webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
+        WebSettings settings = webView.getSettings();
+        settings.setMediaPlaybackRequiresUserGesture(false);
+
+        if (Build.VERSION.SDK_INT >= 26) {
+            webView.setRendererPriorityPolicy(
+                WebView.RENDERER_PRIORITY_IMPORTANT,
+                true
+            );
+        }
 
         webView.addJavascriptInterface(
             new KroviMediaJsBridge(this),
@@ -98,6 +142,7 @@ public class MainActivity extends BridgeActivity {
             unregisterReceiver(mediaCommandReceiver);
             mediaCommandReceiver = null;
         }
+
         webView = null;
         mediaBridgeAttached = false;
         super.onDestroy();

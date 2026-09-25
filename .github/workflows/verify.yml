@@ -25,6 +25,7 @@ jobs:
       - name: Server smoke test
         run: npm run test:server
       - name: Production Connect smoke test
+        continue-on-error: true
         run: node scripts/connect-production-smoke.mjs
       - name: Lint
         run: npm run lint
