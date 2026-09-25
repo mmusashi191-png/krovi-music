@@ -198,7 +198,7 @@ export default function Player({
     if (expanded || event.button > 0) return
 
     const target = event.target
-    if (target.closest('button, input, textarea, a')) return
+    if (target.closest('.pip-close-button, .pip-full-button, input, textarea, a')) return
 
     const dock = event.currentTarget.closest('.pip-player')
     if (!dock) return
@@ -208,6 +208,8 @@ export default function Player({
     const currentY = pipPosition?.y ?? rect.top
 
     dragMovedRef.current = false
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+
     dragRef.current = {
       pointerId: event.pointerId,
       startPointerX: event.clientX,
