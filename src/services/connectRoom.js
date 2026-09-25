@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core'
 
 const CLIENT_ID_KEY = 'krovi-connect-client-v4'
 const DEFAULT_CONNECT_URL = 'wss://krovi-music.onrender.com/ws'
+const DEFAULT_HTTP_URL = 'https://krovi-music.onrender.com'
 
 let socket = null
 let socketPromise = null
@@ -110,6 +111,22 @@ function attachSocketEvents(nextSocket) {
   })
 }
 
+async function warmHostedService() {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 20_000)
+
+  try {
+    const response = await fetch(DEFAULT_HTTP_URL + '/health', {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+
+    if (!response.ok) throw new Error('Hosted service unavailable.')
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
 function connectSocket() {
   if (socket?.readyState === WebSocket.OPEN) return Promise.resolve(socket)
   if (socketPromise) return socketPromise
@@ -118,8 +135,16 @@ function connectSocket() {
     let settled = false
     let timeoutId
 
+    const createWebSocket = () => {
+      try {
+        return new WebSocket(getWebSocketUrl())
+      } catch (error) {
+        throw error
+      }
+    }
+
     try {
-      const nextSocket = new WebSocket(getWebSocketUrl())
+      const nextSocket = createWebSocket()
 
       notify({ type: 'connection-state', state: 'connecting' })
 
@@ -171,8 +196,20 @@ function connectSocket() {
   return socketPromise
 }
 
+function connectWithWarmup() {
+  const nativeOrHosted = Capacitor.isNativePlatform()
+  const url = getWebSocketUrl()
+  const isHosted = url === DEFAULT_CONNECT_URL
+
+  if (isHosted && nativeOrHosted) {
+    return warmHostedService().catch(() => {}).then(() => connectSocket())
+  }
+
+  return connectSocket()
+}
+
 function request(message, expectedType) {
-  return connectSocket().then((activeSocket) => new Promise((resolve, reject) => {
+  return connectWithWarmup().then((activeSocket) => new Promise((resolve, reject) => {
     let finished = false
 
     const cleanup = () => listeners.delete(handleMessage)
@@ -281,7 +318,7 @@ export function subscribeToConnection(onState) {
 }
 
 export function updatePlaybackState(roomCode, playback, options = {}) {
-  return connectSocket().then((activeSocket) => {
+  return connectWithWarmup().then((activeSocket) => {
     const command = options.command || 'playback'
     const shouldCarrySeek = command === 'seek' || command === 'track'
 
