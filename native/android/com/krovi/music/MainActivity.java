@@ -111,8 +111,8 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
-        public void start(String title, String artist) {
-            KroviMediaService.start(activity, title, artist);
+        public void update(String title, String artist, boolean playing) {
+            KroviMediaService.update(activity, title, artist, playing);
         }
 
         @JavascriptInterface
