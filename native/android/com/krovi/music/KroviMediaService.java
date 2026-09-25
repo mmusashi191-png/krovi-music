@@ -12,6 +12,7 @@ import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 public class KroviMediaService extends Service {
     public static final String ACTION_START = "com.krovi.music.media.START";
@@ -29,6 +30,7 @@ public class KroviMediaService extends Service {
     private static final int NOTIFICATION_ID = 61042;
     private static final String CHANNEL_ID = "krovi-playback";
     private MediaSession mediaSession;
+    private PowerManager.WakeLock wakeLock;
     private String title = "Krovi Music";
     private String artist = "YouTube";
     private boolean playing = true;
@@ -127,6 +129,7 @@ public class KroviMediaService extends Service {
         }
 
         playing = true;
+        ensureWakeLock();
         publishPlaybackState();
         startNotification();
 
@@ -239,6 +242,7 @@ public class KroviMediaService extends Service {
 
     private void stopNotification() {
         playing = false;
+        releaseWakeLock();
         if (mediaSession != null) {
             mediaSession.setActive(false);
         }
@@ -249,6 +253,27 @@ public class KroviMediaService extends Service {
             stopForeground(true);
         }
         stopSelf();
+    }
+
+    private void ensureWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) return;
+
+        PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (manager == null) return;
+
+        wakeLock = manager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "KroviMusic:Playback"
+        );
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire();
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+        wakeLock = null;
     }
 
     private void createNotificationChannel() {
@@ -269,6 +294,7 @@ public class KroviMediaService extends Service {
 
     @Override
     public void onDestroy() {
+        releaseWakeLock();
         if (mediaSession != null) {
             mediaSession.release();
             mediaSession = null;
